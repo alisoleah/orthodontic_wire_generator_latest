@@ -503,12 +503,25 @@ class WireGeneratorGUI:
         if not self.generator:
             messagebox.showerror("Error", "Generate wire first!")
             return
-        
+
         try:
-            thread = threading.Thread(target=self.generator.launch_interactive_mode, daemon=True)
-            thread.start()
-            messagebox.showinfo("3D Editor", "Interactive 3D editor launched!\nClose the 3D window to return.")
+            # IMPORTANT: On macOS, Open3D MUST run on main thread
+            # Do NOT use threading for Open3D visualization
+            print("\nLaunching 3D Interactive Editor...")
+            print("Note: GUI will be unresponsive while 3D editor is open")
+            print("Close the 3D window to return to the GUI\n")
+
+            # Hide the main window temporarily
+            self.root.withdraw()
+
+            # Launch on main thread (required for macOS)
+            self.generator.launch_interactive_mode()
+
+            # Restore main window after 3D editor closes
+            self.root.deiconify()
+
         except Exception as e:
+            self.root.deiconify()  # Make sure to restore window on error
             messagebox.showerror("Error", f"Failed to launch 3D editor:\n{str(e)}")
     
     def save_design(self):
