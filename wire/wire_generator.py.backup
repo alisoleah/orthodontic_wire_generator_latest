@@ -21,7 +21,7 @@ from core.tooth_detector import ToothDetector
 from core.bracket_positioner import BracketPositioner
 from core.constants import WIRE_SIZES
 
-# from wire.wire_path_creator import WirePathCreator
+from wire.wire_path_creator import WirePathCreator
 from wire.wire_mesh_builder import WireMeshBuilder
 from wire.height_controller import HeightController
 
@@ -52,9 +52,7 @@ class WireGenerator:
         self.bracket_positioner = BracketPositioner()
         
         # Initialize wire components
-        # self.wire_path_creator = WirePathCreator()
-        from wire.wire_path_creator_enhanced import WirePathCreatorEnhanced, PathGenerationStrategy
-        self.wire_path_creator = WirePathCreatorEnhanced(strategy=PathGenerationStrategy.CATMULL_ROM)
+        self.wire_path_creator = WirePathCreator()
         self.wire_mesh_builder = WireMeshBuilder()
         self.height_controller = HeightController()
         
@@ -244,134 +242,110 @@ class WireGenerator:
     def _setup_visualization(self):
         """Setup visualization components with hidden elements."""
         print("\n--- STEP 6: VISUALIZATION SETUP ---")
-
-        try:
-            # Create enhanced visualization meshes (hidden elements)
-            self.create_enhanced_visualization_meshes()
-
-            print("DEBUG: Creating Visualizer3D object...")
-            self.visualizer = Visualizer3D(
-                mesh=self.mesh,
-                wire_mesh=self.wire_mesh,
-                bracket_positions=self.bracket_positions,
-                control_points=self.wire_control_points
-            )
-            print(f"DEBUG: Visualizer created: {self.visualizer}")
-
-            # Setup control point manager
-            print("DEBUG: Setting up control point manager...")
-            self.control_point_manager.setup(
-                self.wire_control_points,
-                self.wire_path_creator,
-                self.wire_mesh_builder
-            )
-
-            print("✓ Clean visualization ready (visual elements hidden)")
-        except Exception as e:
-            print(f"ERROR in _setup_visualization: {e}")
-            import traceback
-            traceback.print_exc()
+        
+        # Create enhanced visualization meshes (hidden elements)
+        self.create_enhanced_visualization_meshes()
+        
+        self.visualizer = Visualizer3D(
+            mesh=self.mesh,
+            wire_mesh=self.wire_mesh,
+            bracket_positions=self.bracket_positions,
+            control_points=self.wire_control_points
+        )
+        
+        # Setup control point manager
+        self.control_point_manager.setup(
+            self.wire_control_points,
+            self.wire_path_creator,
+            self.wire_mesh_builder
+        )
+        
+        print("✓ Clean visualization ready (visual elements hidden)")
     
     def create_enhanced_visualization_meshes(self):
         """Create 3D visualization meshes with hidden visual elements."""
         print(f"\n{'─'*50}")
         print("CREATING CLEAN 3D VISUALIZATION")
         print(f"{'─'*50}")
-
-        try:
-            # HIDDEN: Create bracket meshes internally but don't display them
-            self.bracket_meshes = []
-            visible_posteriors = [b for b in self.bracket_positions if b.get('visible', True) and b['tooth_type'] == 'posterior']
-
-            for i, bracket in enumerate(self.bracket_positions):
-                if not bracket.get('visible', True):
-                    continue
-
-                # Create bracket box for internal tracking only
-                bracket_mesh = o3d.geometry.TriangleMesh.create_box(1.8, 2.0, 1.2)
-                bracket_mesh.translate([-0.9, -1.0, -0.6])
-
-                # Orient bracket (if normal available)
-                if 'normal' in bracket and np.linalg.norm(bracket['normal']) > 0:
-                    z_axis = np.array([0, 0, 1])
-                    normal = bracket['normal']
-
-                    rotation_axis = np.cross(z_axis, normal)
-                    if np.linalg.norm(rotation_axis) > 1e-6:
-                        rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
-                        angle = np.arccos(np.clip(np.dot(z_axis, normal), -1, 1))
-                        R = o3d.geometry.get_rotation_matrix_from_axis_angle(rotation_axis * angle)
-                        bracket_mesh.rotate(R, center=[0, 0, 0])
-
-                bracket_mesh.translate(bracket['position'])
-
-                # Color based on tooth type (for internal reference)
-                color = [0.7, 0.7, 0.7] # Default gray
-                if bracket['tooth_type'] == 'posterior' and visible_posteriors:
-                    if bracket is visible_posteriors[0] or bracket is visible_posteriors[-1]:
-                        color = [0.9, 0.8, 0.1]  # Yellow for corner teeth
-                    else:
-                        color = [0.1, 0.3, 0.8]  # Blue for middle teeth
-
-                bracket_mesh.paint_uniform_color(color)
-                bracket_mesh.compute_vertex_normals()
-
-                self.bracket_meshes.append({
-                    'mesh': bracket_mesh,
-                    'index': i,
-                    'original_color': color,
-                    'bracket': bracket
-                })
-
-            # HIDDEN: Create control point meshes internally but don't display them
-            self.control_point_meshes = []
-            for i, cp in enumerate(self.wire_control_points):
-                # Handle both dict and ControlPoint object formats
-                if hasattr(cp, 'type'):
-                    # ControlPoint object
-                    cp_type = cp.type
-                    cp_position = cp.position.copy()
+        
+        # HIDDEN: Create bracket meshes internally but don't display them
+        self.bracket_meshes = []
+        visible_posteriors = [b for b in self.bracket_positions if b.get('visible', True) and b['tooth_type'] == 'posterior']
+        
+        for i, bracket in enumerate(self.bracket_positions):
+            if not bracket.get('visible', True):
+                continue
+            
+            # Create bracket box for internal tracking only
+            bracket_mesh = o3d.geometry.TriangleMesh.create_box(1.8, 2.0, 1.2)
+            bracket_mesh.translate([-0.9, -1.0, -0.6])
+            
+            # Orient bracket (if normal available)
+            if 'normal' in bracket and np.linalg.norm(bracket['normal']) > 0:
+                z_axis = np.array([0, 0, 1])
+                normal = bracket['normal']
+                
+                rotation_axis = np.cross(z_axis, normal)
+                if np.linalg.norm(rotation_axis) > 1e-6:
+                    rotation_axis = rotation_axis / np.linalg.norm(rotation_axis)
+                    angle = np.arccos(np.clip(np.dot(z_axis, normal), -1, 1))
+                    R = o3d.geometry.get_rotation_matrix_from_axis_angle(rotation_axis * angle)
+                    bracket_mesh.rotate(R, center=[0, 0, 0])
+            
+            bracket_mesh.translate(bracket['position'])
+            
+            # Color based on tooth type (for internal reference)
+            color = [0.7, 0.7, 0.7] # Default gray
+            if bracket['tooth_type'] == 'posterior' and visible_posteriors:
+                if bracket is visible_posteriors[0] or bracket is visible_posteriors[-1]:
+                    color = [0.9, 0.8, 0.1]  # Yellow for corner teeth
                 else:
-                    # Dictionary format
-                    cp_type = cp['type']
-                    cp_position = cp['position'].copy()
-
-                if cp_type == 'bracket':
-                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.8, resolution=8)
-                    color = [0.9, 0.1, 0.1]  # Red for bracket points
-                else:
-                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=8)
-                    color = [0.1, 0.9, 0.1]  # Green for midpoint controls
-
-                # Apply height offset to control point positions
-                position = cp_position
-                position[self.height_axis] += self.wire_height_offset
-
-                sphere.translate(position)
-                sphere.paint_uniform_color(color)
-                sphere.compute_vertex_normals()
-
-                self.control_point_meshes.append({
-                    'mesh': sphere,
-                    'index': i,
-                    'original_color': color,
-                    'control_point': cp
-                })
-
-            # Create wire mesh (this WILL be displayed)
-            self.wire_mesh = self._create_wire_mesh()
-
-            print(f"✓ Created {len(self.bracket_meshes)} bracket meshes (hidden)")
-            print(f"✓ Created {len(self.control_point_meshes)} control point meshes (hidden)")
-            print(f"✓ Created wire mesh with {len(self.wire_mesh.vertices)} vertices (visible)")
-            print("✓ Clean visualization ready - only dental mesh and wire will be shown")
-
-            return self.wire_mesh, self.bracket_meshes, self.control_point_meshes
-        except Exception as e:
-            print(f"ERROR in create_enhanced_visualization_meshes: {e}")
-            import traceback
-            traceback.print_exc()
-            return None, [], []
+                    color = [0.1, 0.3, 0.8]  # Blue for middle teeth
+            
+            bracket_mesh.paint_uniform_color(color)
+            bracket_mesh.compute_vertex_normals()
+            
+            self.bracket_meshes.append({
+                'mesh': bracket_mesh,
+                'index': i,
+                'original_color': color,
+                'bracket': bracket
+            })
+        
+        # HIDDEN: Create control point meshes internally but don't display them
+        self.control_point_meshes = []
+        for i, cp in enumerate(self.wire_control_points):
+            if cp['type'] == 'bracket':
+                sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.8, resolution=8)
+                color = [0.9, 0.1, 0.1]  # Red for bracket points
+            else:
+                sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=8)
+                color = [0.1, 0.9, 0.1]  # Green for midpoint controls
+            
+            # Apply height offset to control point positions
+            position = cp['position'].copy()
+            position[self.height_axis] += self.wire_height_offset
+            
+            sphere.translate(position)
+            sphere.paint_uniform_color(color)
+            sphere.compute_vertex_normals()
+            
+            self.control_point_meshes.append({
+                'mesh': sphere,
+                'index': i,
+                'original_color': color,
+                'control_point': cp
+            })
+        
+        # Create wire mesh (this WILL be displayed)
+        self.wire_mesh = self._create_wire_mesh()
+        
+        print(f"✓ Created {len(self.bracket_meshes)} bracket meshes (hidden)")
+        print(f"✓ Created {len(self.control_point_meshes)} control point meshes (hidden)")
+        print(f"✓ Created wire mesh with {len(self.wire_mesh.vertices)} vertices (visible)")
+        print("✓ Clean visualization ready - only dental mesh and wire will be shown")
+        
+        return self.wire_mesh, self.bracket_meshes, self.control_point_meshes
     
     def _create_wire_mesh(self):
         """Create wire mesh from current wire path."""
@@ -437,129 +411,38 @@ class WireGenerator:
             }
         }
     
-    # Position Control Interface Methods
-    def adjust_wire_position(self, y_offset: float = 0.0, z_offset: float = 0.0):
-        """Adjust wire position in Y (up/down) and Z (forward/backward) and update mesh."""
-        # Store current offsets (initialize if not exists)
-        if not hasattr(self, 'wire_y_offset'):
-            self.wire_y_offset = 0.0
-        if not hasattr(self, 'wire_z_offset'):
-            self.wire_z_offset = 0.0
-        if not hasattr(self, 'original_bracket_positions'):
-            # Store original bracket positions on first adjustment
-            self.original_bracket_positions = [b.copy() if isinstance(b, dict) else b for b in self.bracket_positions]
-
-        # Update offsets
-        self.wire_y_offset += y_offset
-        self.wire_z_offset += z_offset
-
-        # Recalculate bracket positions to follow tooth surface
-        if y_offset != 0 or z_offset != 0:
-            self._adjust_bracket_positions_to_surface(y_offset, z_offset)
-
-        # Regenerate wire path with adjusted bracket positions
+    # Height Control Interface Methods
+    def adjust_wire_height(self, delta_height: float):
+        """Adjust wire height and update mesh."""
+        # Update height controller
+        self.height_controller.adjust_height(delta_height)
+        
+        # Regenerate wire path with new height
+        height_offset = self.height_controller.get_height_offset()
+        self.wire_height_offset = height_offset
+        
         self.wire_path = self.wire_path_creator.create_smooth_path(
             self.bracket_positions,
             self.arch_center,
-            0.0  # No additional height offset, positions are already adjusted
+            height_offset
         )
-
+        
         # Rebuild wire mesh
+        old_mesh = self.wire_mesh
         self.wire_mesh = self._create_wire_mesh()
-
+        
         # Update visualization if available
         if self.visualizer:
             self.visualizer.update_wire_mesh(self.wire_mesh)
-
-        print(f"Wire position adjusted: Y={self.wire_y_offset:.2f}mm, Z={self.wire_z_offset:.2f}mm")
-
-    def _adjust_bracket_positions_to_surface(self, y_offset: float, z_offset: float):
-        """Adjust bracket positions to follow tooth surface when moving."""
-        import open3d as o3d
-
-        # Create a raycasting scene for tooth surface detection
-        mesh_legacy = o3d.t.geometry.TriangleMesh.from_legacy(self.mesh)
-        scene = o3d.t.geometry.RaycastingScene()
-        scene.add_triangles(mesh_legacy)
-
-        for i, bracket in enumerate(self.bracket_positions):
-            # Get original position
-            if isinstance(bracket, dict):
-                orig_pos = self.original_bracket_positions[i]['position'].copy()
-            else:
-                orig_pos = self.original_bracket_positions[i].position.copy()
-
-            # Apply offset to create target position
-            target_pos = orig_pos.copy()
-            target_pos[1] += self.wire_y_offset  # Y offset
-            target_pos[2] += self.wire_z_offset  # Z offset
-
-            # Cast ray from target position toward tooth (inward direction)
-            ray_origin = target_pos.copy()
-            ray_direction = -bracket['normal'] if isinstance(bracket, dict) else -bracket.normal
-
-            # Normalize ray direction
-            ray_direction = ray_direction / np.linalg.norm(ray_direction)
-
-            # Cast ray to find surface intersection
-            rays = o3d.core.Tensor([[*ray_origin, *ray_direction]], dtype=o3d.core.Dtype.Float32)
-            result = scene.cast_rays(rays)
-
-            # If hit, update bracket position to surface
-            if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
-                hit_distance = float(result['t_hit'][0].numpy())
-                new_position = ray_origin + ray_direction * hit_distance
-
-                # Update bracket position
-                if isinstance(bracket, dict):
-                    bracket['position'] = new_position
-                else:
-                    bracket.position = new_position
-            else:
-                # No hit, just apply offset directly
-                if isinstance(bracket, dict):
-                    bracket['position'] = target_pos
-                else:
-                    bracket.position = target_pos
-
-    def reset_wire_position(self):
-        """Reset wire position to original."""
-        if hasattr(self, 'original_bracket_positions'):
-            # Restore original bracket positions
-            for i, orig_bracket in enumerate(self.original_bracket_positions):
-                if isinstance(self.bracket_positions[i], dict):
-                    self.bracket_positions[i]['position'] = orig_bracket['position'].copy()
-                else:
-                    self.bracket_positions[i].position = orig_bracket.position.copy()
-
-            # Reset offsets
-            self.wire_y_offset = 0.0
-            self.wire_z_offset = 0.0
-
-            # Regenerate wire path with original positions
-            self.wire_path = self.wire_path_creator.create_smooth_path(
-                self.bracket_positions,
-                self.arch_center,
-                0.0
-            )
-
-            # Rebuild wire mesh
-            self.wire_mesh = self._create_wire_mesh()
-
-            # Update visualization if available
-            if self.visualizer:
-                self.visualizer.update_wire_mesh(self.wire_mesh)
-
-        print("Wire position reset to original")
-
-    # Legacy height control methods (for backward compatibility)
-    def adjust_wire_height(self, delta_height: float):
-        """Adjust wire height and update mesh (legacy method)."""
-        self.adjust_wire_position(y_offset=delta_height)
-
+        
+        print(f"Wire height adjusted by {delta_height:.2f}mm (total offset: {height_offset:.2f}mm)")
+    
     def reset_wire_height(self):
-        """Reset wire height to original position (legacy method)."""
-        self.reset_wire_position()
+        """Reset wire height to original position."""
+        self.height_controller.reset_height()
+        self.wire_height_offset = 0.0
+        self.adjust_wire_height(0)  # Trigger rebuild with zero offset
+        print("Wire height reset to original position")
     
     def get_wire_height_offset(self) -> float:
         """Get current wire height offset."""
@@ -663,49 +546,29 @@ class WireGenerator:
     # Interactive Mode
     def launch_interactive_mode(self):
         """Launch interactive 3D editor with clean visualization."""
-        print(f"\nDEBUG: Checking visualization setup...")
-        print(f"  self.visualizer = {self.visualizer}")
-        print(f"  self.mesh = {self.mesh}")
-        print(f"  self.wire_mesh = {self.wire_mesh}")
-
         if self.visualizer is None:
             print("ERROR: Visualization not setup. Run generate_wire() first.")
             return
-
-        if self.mesh is None:
-            print("ERROR: Mesh not loaded. Run generate_wire() first.")
-            return
-
-        if self.wire_mesh is None:
-            print("ERROR: Wire mesh not created. Run generate_wire() first.")
-            return
-
+        
         print("\n" + "="*60)
         print("LAUNCHING CLEAN INTERACTIVE 3D EDITOR")
         print("="*60)
-
+        
         # Setup interactive callbacks
         self.visualizer.setup_interactive_mode(
             height_controller=self.height_controller,
             control_point_manager=self.control_point_manager,
             wire_generator=self  # Pass self for callbacks
         )
-
+        
         print("Visual elements hidden for clean presentation:")
         print("• Bracket boxes: HIDDEN")
         print("• Control point spheres: HIDDEN")
         print("• Coordinate frame: HIDDEN")
         print("• Only dental mesh and wire displayed")
-
+        
         # Launch visualization
-        print("\nCalling visualizer.run()...")
-        try:
-            self.visualizer.run()
-            print("Visualizer closed successfully.")
-        except Exception as e:
-            print(f"ERROR during visualization: {e}")
-            import traceback
-            traceback.print_exc()
+        self.visualizer.run()
     
     def print_summary(self):
         """Print generation summary."""

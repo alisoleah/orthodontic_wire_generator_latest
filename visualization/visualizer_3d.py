@@ -74,19 +74,29 @@ class Visualizer3D:
     def create_control_point_meshes(self):
         """Create 3D meshes for control points."""
         self.control_point_meshes = []
-        
+
         for i, cp in enumerate(self.control_points):
-            if cp['type'] == 'bracket':
+            # Handle both dict and ControlPoint object formats
+            if hasattr(cp, 'type'):
+                # ControlPoint object
+                cp_type = cp.type
+                cp_position = cp.position
+            else:
+                # Dictionary format
+                cp_type = cp['type']
+                cp_position = cp['position']
+
+            if cp_type == 'bracket':
                 sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.8, resolution=8)
                 color = [0.9, 0.1, 0.1]  # Red for bracket points
             else:
                 sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=8)
                 color = [0.1, 0.9, 0.1]  # Green for intermediate points
-            
-            sphere.translate(cp['position'])
+
+            sphere.translate(cp_position)
             sphere.paint_uniform_color(color)
             sphere.compute_vertex_normals()
-            
+
             self.control_point_meshes.append({
                 'mesh': sphere,
                 'index': i,
@@ -106,23 +116,32 @@ class Visualizer3D:
             return False
         
         def key_wire_up(vis):
-            if self.height_controller:
-                self.height_controller.adjust_height(0.5)
-                self.wire_generator.adjust_wire_height(0)  # Trigger rebuild
+            if self.wire_generator:
+                self.wire_generator.adjust_wire_position(y_offset=0.5)
                 self.update_wire_mesh(self.wire_generator.wire_mesh)
             return False
-        
+
         def key_wire_down(vis):
-            if self.height_controller:
-                self.height_controller.adjust_height(-0.5)
-                self.wire_generator.adjust_wire_height(0)  # Trigger rebuild
+            if self.wire_generator:
+                self.wire_generator.adjust_wire_position(y_offset=-0.5)
                 self.update_wire_mesh(self.wire_generator.wire_mesh)
             return False
-        
-        def key_reset_height(vis):
-            if self.height_controller:
-                self.height_controller.reset_height()
-                self.wire_generator.adjust_wire_height(0)  # Trigger rebuild
+
+        def key_wire_forward(vis):
+            if self.wire_generator:
+                self.wire_generator.adjust_wire_position(z_offset=0.5)
+                self.update_wire_mesh(self.wire_generator.wire_mesh)
+            return False
+
+        def key_wire_backward(vis):
+            if self.wire_generator:
+                self.wire_generator.adjust_wire_position(z_offset=-0.5)
+                self.update_wire_mesh(self.wire_generator.wire_mesh)
+            return False
+
+        def key_reset_position(vis):
+            if self.wire_generator:
+                self.wire_generator.reset_wire_position()
                 self.update_wire_mesh(self.wire_generator.wire_mesh)
             return False
         
@@ -142,9 +161,11 @@ class Visualizer3D:
         # Register callbacks
         self.vis.register_key_callback(ord('Q'), key_quit)
         self.vis.register_key_callback(ord('H'), key_help)
-        self.vis.register_key_callback(265, key_wire_up)      # Up arrow
-        self.vis.register_key_callback(264, key_wire_down)    # Down arrow
-        self.vis.register_key_callback(ord('R'), key_reset_height)
+        self.vis.register_key_callback(265, key_wire_up)         # Up arrow - move up
+        self.vis.register_key_callback(264, key_wire_down)       # Down arrow - move down
+        self.vis.register_key_callback(ord('W'), key_wire_forward)   # W - move forward
+        self.vis.register_key_callback(ord('S'), key_wire_backward)  # S - move backward
+        self.vis.register_key_callback(ord('R'), key_reset_position)
         
         # Control point selection (1-9)
         for i in range(1, 10):
@@ -219,20 +240,20 @@ class Visualizer3D:
             self.vis.add_geometry(self.wire_mesh, reset_bounding_box=False)
     
     def update_control_points(self, new_control_points):
-        """Update control point meshes."""
+        """Update control point meshes (hidden - for internal tracking only)."""
         self.control_points = new_control_points
-        
+
         if self.vis:
             # Remove old control point meshes
             for cpm in self.control_point_meshes:
                 self.vis.remove_geometry(cpm['mesh'], reset_bounding_box=False)
-            
-            # Create new ones
+
+            # Create new ones (but don't add them - keep hidden)
             self.create_control_point_meshes()
-            
-            # Add new meshes
-            for cpm in self.control_point_meshes:
-                self.vis.add_geometry(cpm['mesh'], reset_bounding_box=False)
+
+            # DON'T add new meshes - keep them hidden
+            # for cpm in self.control_point_meshes:
+            #     self.vis.add_geometry(cpm['mesh'], reset_bounding_box=False)
     
     def highlight_selected_control_point(self, index):
         """Highlight selected control point."""
@@ -255,10 +276,12 @@ class Visualizer3D:
         print("\n" + "="*60)
         print("INTERACTIVE 3D EDITOR - MODULAR ARCHITECTURE")
         print("="*60)
-        print("\nWIRE HEIGHT CONTROLS:")
-        print("  Up Arrow      - Move wire up")
-        print("  Down Arrow    - Move wire down")
-        print("  R             - Reset wire height")
+        print("\nWIRE POSITION CONTROLS:")
+        print("  Up Arrow      - Move wire up (Y+)")
+        print("  Down Arrow    - Move wire down (Y-)")
+        print("  W             - Move wire forward (Z+)")
+        print("  S             - Move wire backward (Z-)")
+        print("  R             - Reset wire position")
         print("\nCONTROL POINT CONTROLS:")
         print("  1-9           - Select control point")
         print("  Left/Right    - Move selected point horizontally")

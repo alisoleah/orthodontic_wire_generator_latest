@@ -500,9 +500,17 @@ class WireGeneratorGUI:
     # Other methods
     def launch_3d_editor(self):
         """Launch 3D editor using modular visualization system."""
+        print("\nDEBUG: launch_3d_editor called")
+        print(f"  self.generator = {self.generator}")
+
         if not self.generator:
             messagebox.showerror("Error", "Generate wire first!")
             return
+
+        print(f"  Generator exists, checking components...")
+        print(f"  generator.visualizer = {self.generator.visualizer}")
+        print(f"  generator.mesh = {self.generator.mesh}")
+        print(f"  generator.wire_mesh = {self.generator.wire_mesh}")
 
         try:
             # IMPORTANT: On macOS, Open3D MUST run on main thread
@@ -522,6 +530,9 @@ class WireGeneratorGUI:
 
         except Exception as e:
             self.root.deiconify()  # Make sure to restore window on error
+            print(f"Exception in launch_3d_editor: {e}")
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("Error", f"Failed to launch 3D editor:\n{str(e)}")
     
     def save_design(self):

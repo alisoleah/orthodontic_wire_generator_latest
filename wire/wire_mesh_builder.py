@@ -12,6 +12,9 @@ import numpy as np
 import open3d as o3d
 from typing import Optional, Tuple, List
 import math
+import warnings
+import sys
+import io
 
 class WireMeshBuilder:
     """
@@ -225,23 +228,33 @@ class WireMeshBuilder:
         """Get statistics about the current wire mesh - handles non-watertight meshes."""
         if self.wire_mesh is None:
             return {'valid': False}
-        
-        try:
-            volume = self.wire_mesh.get_volume()
-        except Exception as e:
-            print(f"Warning: Could not calculate volume (mesh may not be watertight): {e}")
-            volume = 0.0
-        
+
+        # Suppress Open3D warnings about non-watertight meshes
+        # Wire meshes are intentionally not watertight (hollow tubes)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # Also suppress stderr output from Open3D C++ layer
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+
+            try:
+                volume = self.wire_mesh.get_volume()
+            except Exception:
+                # Wire meshes are not watertight - this is expected
+                volume = 0.0
+            finally:
+                sys.stderr = old_stderr
+
         try:
             surface_area = self.wire_mesh.get_surface_area()
-        except Exception as e:
-            print(f"Warning: Could not calculate surface area: {e}")
+        except Exception:
+            # Silently handle if surface area cannot be calculated
             surface_area = 0.0
-        
+
         try:
             bounding_box = self.wire_mesh.get_axis_aligned_bounding_box()
-        except Exception as e:
-            print(f"Warning: Could not calculate bounding box: {e}")
+        except Exception:
+            # Silently handle if bounding box cannot be calculated
             bounding_box = None
         
         return {
