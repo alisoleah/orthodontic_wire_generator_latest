@@ -626,16 +626,43 @@ class WireGenerator:
                 hit_pos = ray_origin + ray_dir * float(result['t_hit'][0].numpy())
                 valid_hits.append(hit_pos)
 
-        # Choose hit closest to gums (upper surface in vertical direction)
-        # For upper arch: prefer higher Z (toward palate/gums)
-        # For lower arch: prefer lower Z (toward floor of mouth/gums)
+        # Choose hit closest to gums using normal-based direction
+        # Instead of relying on absolute Z-axis (which varies by scan orientation),
+        # use the cross product of normal and horizontal plane to find "up" direction
         if valid_hits:
-            if self.arch_type == 'upper':
-                # Upper arch: higher Z = closer to gums
-                best_hit = valid_hits[np.argmax([hit[2] for hit in valid_hits])]
+            # Define "up" direction relative to bracket normal
+            # For lingual surface: normal points inward, gum direction is perpendicular
+
+            # Create a vertical reference (world Z-axis)
+            world_up = np.array([0, 0, 1])
+
+            # Find direction along tooth surface toward gums
+            # This is perpendicular to both the inward normal and the horizontal plane
+            horizontal_normal = normal.copy()
+            horizontal_normal[2] = 0  # Project to horizontal plane
+
+            if np.linalg.norm(horizontal_normal) > 0.01:
+                # Gum direction: cross product of inward normal and horizontal component
+                # For lower arch, this points upward; for upper arch, downward
+                gum_direction = np.cross(normal, horizontal_normal)
+                gum_direction = gum_direction / (np.linalg.norm(gum_direction) + 1e-6)
+
+                # Ensure gum direction points toward gums
+                if self.arch_type == 'upper':
+                    # Upper arch: gums are "down" (negative Z direction from palate)
+                    if gum_direction[2] > 0:
+                        gum_direction = -gum_direction
+                else:
+                    # Lower arch: gums are "up" (positive Z direction from floor)
+                    if gum_direction[2] < 0:
+                        gum_direction = -gum_direction
             else:
-                # Lower arch: lower Z = closer to gums
-                best_hit = valid_hits[np.argmin([hit[2] for hit in valid_hits])]
+                # Fallback: use world Z-axis
+                gum_direction = world_up if self.arch_type == 'lower' else -world_up
+
+            # Project hits onto gum direction and choose maximum
+            projections = [np.dot(hit - orig_pos, gum_direction) for hit in valid_hits]
+            best_hit = valid_hits[np.argmax(projections)]
             return best_hit
 
         return None

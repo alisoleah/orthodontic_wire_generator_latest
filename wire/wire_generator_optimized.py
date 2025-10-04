@@ -79,16 +79,32 @@ class WireAdjustmentOptimizer:
             hit_pos = ray_origin_inside + ray_dir_outward * float(result['t_hit'][0].numpy())
             valid_hits.append(hit_pos)
 
-        # Choose hit closest to gums (upper surface in vertical direction)
-        # For upper arch: prefer higher Z (toward palate/gums)
-        # For lower arch: prefer lower Z (toward floor of mouth/gums)
+        # Choose hit closest to gums using normal-based direction
+        # Orientation-agnostic approach using bracket normal
         if valid_hits:
-            if self.arch_type == 'upper':
-                # Upper arch: higher Z = closer to gums
-                return valid_hits[np.argmax([hit[2] for hit in valid_hits])]
+            # Define gum direction relative to bracket normal
+            world_up = np.array([0, 0, 1])
+            horizontal_normal = normal.copy()
+            horizontal_normal[2] = 0
+
+            if np.linalg.norm(horizontal_normal) > 0.01:
+                # Gum direction: cross product of inward normal and horizontal
+                gum_direction = np.cross(normal, horizontal_normal)
+                gum_direction = gum_direction / (np.linalg.norm(gum_direction) + 1e-6)
+
+                # Ensure gum direction points toward gums
+                if self.arch_type == 'upper':
+                    if gum_direction[2] > 0:
+                        gum_direction = -gum_direction
+                else:
+                    if gum_direction[2] < 0:
+                        gum_direction = -gum_direction
             else:
-                # Lower arch: lower Z = closer to gums
-                return valid_hits[np.argmin([hit[2] for hit in valid_hits])]
+                gum_direction = world_up if self.arch_type == 'lower' else -world_up
+
+            # Project hits onto gum direction and choose maximum
+            projections = [np.dot(hit - orig_pos, gum_direction) for hit in valid_hits]
+            return valid_hits[np.argmax(projections)]
 
         # Ultimate fallback: interpolate between orig and target
         return orig_pos + (target_pos - orig_pos) * 0.7
