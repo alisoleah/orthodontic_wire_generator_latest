@@ -458,20 +458,57 @@ class WireGenerator:
             self._adjust_bracket_positions_to_surface(y_offset, z_offset)
 
         # Regenerate wire path with adjusted bracket positions
+        try:
+            self.wire_path = self.wire_path_creator.create_smooth_path(
+                self.bracket_positions,
+                self.arch_center,
+                0.0  # No additional height offset, positions are already adjusted
+            )
+
+            if self.wire_path is None or len(self.wire_path) < 2:
+                print("WARNING: Wire path generation failed, reverting changes")
+                self._revert_last_adjustment()
+                return
+
+            # Rebuild wire mesh
+            self.wire_mesh = self._create_wire_mesh()
+
+            if self.wire_mesh is None:
+                print("WARNING: Wire mesh creation failed, reverting changes")
+                self._revert_last_adjustment()
+                return
+
+            # Update visualization if available
+            if self.visualizer:
+                self.visualizer.update_wire_mesh(self.wire_mesh)
+
+            print(f"✓ Wire position adjusted: Y={self.wire_y_offset:.2f}mm, Z={self.wire_z_offset:.2f}mm")
+
+        except Exception as e:
+            print(f"ERROR during wire adjustment: {e}")
+            self._revert_last_adjustment()
+
+    def _revert_last_adjustment(self):
+        """Revert the last wire position adjustment."""
+        # Restore bracket positions
+        for i, orig_bracket in enumerate(self.original_bracket_positions):
+            if isinstance(self.bracket_positions[i], dict):
+                self.bracket_positions[i]['position'] = orig_bracket['position'].copy()
+                self.bracket_positions[i]['normal'] = orig_bracket['normal'].copy()
+            else:
+                self.bracket_positions[i].position = orig_bracket.position.copy()
+                self.bracket_positions[i].normal = orig_bracket.normal.copy()
+
+        # Regenerate wire path
         self.wire_path = self.wire_path_creator.create_smooth_path(
             self.bracket_positions,
             self.arch_center,
-            0.0  # No additional height offset, positions are already adjusted
+            0.0
         )
-
-        # Rebuild wire mesh
         self.wire_mesh = self._create_wire_mesh()
 
-        # Update visualization if available
         if self.visualizer:
             self.visualizer.update_wire_mesh(self.wire_mesh)
-
-        print(f"Wire position adjusted: Y={self.wire_y_offset:.2f}mm, Z={self.wire_z_offset:.2f}mm")
 
     def _adjust_bracket_positions_to_surface(self, y_offset: float, z_offset: float):
         """Adjust bracket positions to follow tooth surface when moving."""
@@ -483,44 +520,139 @@ class WireGenerator:
         scene.add_triangles(mesh_legacy)
 
         for i, bracket in enumerate(self.bracket_positions):
-            # Get original position
+            # Get original position and normal
             if isinstance(bracket, dict):
                 orig_pos = self.original_bracket_positions[i]['position'].copy()
+                orig_normal = self.original_bracket_positions[i]['normal'].copy()
             else:
                 orig_pos = self.original_bracket_positions[i].position.copy()
+                orig_normal = self.original_bracket_positions[i].normal.copy()
 
-            # Apply offset to create target position
-            target_pos = orig_pos.copy()
-            target_pos[1] += self.wire_y_offset  # Y offset
-            target_pos[2] += self.wire_z_offset  # Z offset
+            # Normalize original normal
+            orig_normal = orig_normal / np.linalg.norm(orig_normal)
 
-            # Cast ray from target position toward tooth (inward direction)
-            ray_origin = target_pos.copy()
-            ray_direction = -bracket['normal'] if isinstance(bracket, dict) else -bracket.normal
+            # Calculate the desired movement direction
+            movement_vector = np.array([0, self.wire_y_offset, self.wire_z_offset])
 
-            # Normalize ray direction
-            ray_direction = ray_direction / np.linalg.norm(ray_direction)
+            # Project movement onto the plane perpendicular to the normal
+            # This keeps the wire following the tooth surface contour
+            movement_parallel_to_surface = movement_vector - np.dot(movement_vector, orig_normal) * orig_normal
 
-            # Cast ray to find surface intersection
-            rays = o3d.core.Tensor([[*ray_origin, *ray_direction]], dtype=o3d.core.Dtype.Float32)
-            result = scene.cast_rays(rays)
+            # Start from original position and move along surface
+            surface_target = orig_pos + movement_parallel_to_surface
 
-            # If hit, update bracket position to surface
-            if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
-                hit_distance = float(result['t_hit'][0].numpy())
-                new_position = ray_origin + ray_direction * hit_distance
+            # Multi-directional raycasting for robust surface finding
+            new_position = self._find_surface_position_robust(
+                scene, surface_target, orig_normal, orig_pos
+            )
 
+            if new_position is not None:
                 # Update bracket position
                 if isinstance(bracket, dict):
                     bracket['position'] = new_position
+                    # Update normal if hit surface
+                    new_normal = self._get_surface_normal_at_point(scene, new_position, orig_normal)
+                    if new_normal is not None:
+                        bracket['normal'] = new_normal
                 else:
                     bracket.position = new_position
+                    new_normal = self._get_surface_normal_at_point(scene, new_position, orig_normal)
+                    if new_normal is not None:
+                        bracket.normal = new_normal
             else:
-                # No hit, just apply offset directly
+                # Fallback: apply offset with damping to avoid wild movements
+                fallback_pos = orig_pos + movement_vector * 0.5
                 if isinstance(bracket, dict):
-                    bracket['position'] = target_pos
+                    bracket['position'] = fallback_pos
                 else:
-                    bracket.position = target_pos
+                    bracket.position = fallback_pos
+
+    def _find_surface_position_robust(self, scene, target_pos: np.ndarray,
+                                     normal: np.ndarray, orig_pos: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Robust surface finding using multi-directional raycasting.
+
+        Strategy:
+        1. Cast ray from outside (along normal) toward tooth
+        2. Cast ray from inside (against normal) toward tooth
+        3. Cast ray from target position in multiple directions
+        4. Choose the closest valid hit to target position
+        """
+        import open3d as o3d
+
+        valid_hits = []
+
+        # Strategy 1: Cast from far outside along the normal direction (inward)
+        ray_origin_outside = target_pos + normal * 20.0  # 20mm outside
+        ray_dir_inward = -normal
+
+        rays = o3d.core.Tensor([[*ray_origin_outside, *ray_dir_inward]], dtype=o3d.core.Dtype.Float32)
+        result = scene.cast_rays(rays)
+
+        if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
+            hit_pos = ray_origin_outside + ray_dir_inward * float(result['t_hit'][0].numpy())
+            valid_hits.append(hit_pos)
+
+        # Strategy 2: Cast from inside outward (opposite direction)
+        ray_origin_inside = target_pos - normal * 10.0  # 10mm inside
+        ray_dir_outward = normal
+
+        rays = o3d.core.Tensor([[*ray_origin_inside, *ray_dir_outward]], dtype=o3d.core.Dtype.Float32)
+        result = scene.cast_rays(rays)
+
+        if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
+            hit_pos = ray_origin_inside + ray_dir_outward * float(result['t_hit'][0].numpy())
+            valid_hits.append(hit_pos)
+
+        # Strategy 3: Cast from multiple angles around the target
+        search_directions = [
+            normal,           # along normal
+            -normal,          # opposite normal
+            normal + np.array([0, 0.3, 0]),   # slight variations
+            normal - np.array([0, 0.3, 0]),
+            normal + np.array([0, 0, 0.3]),
+            normal - np.array([0, 0, 0.3]),
+        ]
+
+        for search_dir in search_directions:
+            search_dir_norm = search_dir / (np.linalg.norm(search_dir) + 1e-6)
+            ray_origin = target_pos + search_dir_norm * 15.0
+            ray_dir = -search_dir_norm
+
+            rays = o3d.core.Tensor([[*ray_origin, *ray_dir]], dtype=o3d.core.Dtype.Float32)
+            result = scene.cast_rays(rays)
+
+            if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
+                hit_pos = ray_origin + ray_dir * float(result['t_hit'][0].numpy())
+                valid_hits.append(hit_pos)
+
+        # Choose the hit closest to target position
+        if valid_hits:
+            distances = [np.linalg.norm(hit - target_pos) for hit in valid_hits]
+            best_hit = valid_hits[np.argmin(distances)]
+            return best_hit
+
+        return None
+
+    def _get_surface_normal_at_point(self, scene, point: np.ndarray,
+                                    fallback_normal: np.ndarray) -> Optional[np.ndarray]:
+        """Get the surface normal at a point by casting a ray from nearby."""
+        import open3d as o3d
+
+        # Cast ray from slightly outside the point
+        ray_origin = point + fallback_normal * 2.0
+        ray_dir = -fallback_normal
+
+        rays = o3d.core.Tensor([[*ray_origin, *ray_dir]], dtype=o3d.core.Dtype.Float32)
+        result = scene.cast_rays(rays)
+
+        if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
+            # Get surface normal from raycasting result
+            if 'primitive_normals' in result:
+                normal = result['primitive_normals'][0].numpy()
+                return normal / np.linalg.norm(normal)
+
+        return fallback_normal
 
     def reset_wire_position(self):
         """Reset wire position to original."""

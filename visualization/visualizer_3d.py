@@ -230,14 +230,28 @@ class Visualizer3D:
         self.vis.destroy_window()
     
     def update_wire_mesh(self, new_wire_mesh):
-        """Update wire mesh in visualization."""
-        if self.vis and self.wire_mesh:
-            self.vis.remove_geometry(self.wire_mesh, reset_bounding_box=False)
-        
+        """Update wire mesh in visualization with smooth transition."""
+        if not self.vis:
+            return
+
+        # Remove old wire mesh
+        if self.wire_mesh:
+            try:
+                self.vis.remove_geometry(self.wire_mesh, reset_bounding_box=False)
+            except Exception as e:
+                print(f"Warning: Failed to remove old wire mesh: {e}")
+
+        # Store new mesh
         self.wire_mesh = new_wire_mesh
-        
-        if self.vis and self.wire_mesh:
-            self.vis.add_geometry(self.wire_mesh, reset_bounding_box=False)
+
+        # Add new wire mesh
+        if self.wire_mesh:
+            try:
+                self.vis.add_geometry(self.wire_mesh, reset_bounding_box=False)
+                # Force update of rendering
+                self.vis.update_renderer()
+            except Exception as e:
+                print(f"Error: Failed to add new wire mesh: {e}")
     
     def update_control_points(self, new_control_points):
         """Update control point meshes (hidden - for internal tracking only)."""
