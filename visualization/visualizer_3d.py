@@ -412,3 +412,101 @@ class MeshFactory:
         cylinder.compute_vertex_normals()
         
         return cylinder
+    def create_ideal_arch_curve_mesh(self, ideal_curve_points):
+        """Create a visual representation of the ideal arch curve."""
+        if ideal_curve_points is None or len(ideal_curve_points) < 2:
+            return None
+        
+        # Create line set for the ideal curve
+        lines = [[i, i + 1] for i in range(len(ideal_curve_points) - 1)]
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(ideal_curve_points)
+        line_set.lines = o3d.utility.Vector2iVector(lines)
+        
+        # Color the ideal curve in bright cyan to distinguish it
+        colors = [[0.0, 1.0, 1.0] for _ in range(len(lines))]  # Cyan
+        line_set.colors = o3d.utility.Vector3dVector(colors)
+        
+        return line_set
+    
+    def create_interactive_control_points(self, ideal_curve_points, num_controls=7):
+        """Create interactive control points along the ideal arch curve."""
+        if ideal_curve_points is None or len(ideal_curve_points) < num_controls:
+            return []
+        
+        # Select evenly spaced points along the curve for control
+        indices = np.linspace(0, len(ideal_curve_points) - 1, num_controls, dtype=int)
+        control_points = []
+        
+        for i, idx in enumerate(indices):
+            point = ideal_curve_points[idx]
+            
+            # Create a larger sphere for interactive control
+            sphere = o3d.geometry.TriangleMesh.create_sphere(radius=1.5, resolution=12)
+            sphere.translate(point)
+            
+            # Color based on position (anterior vs posterior)
+            if i == 0 or i == num_controls - 1:
+                color = [1.0, 0.5, 0.0]  # Orange for end points
+            elif i == num_controls // 2:
+                color = [1.0, 0.0, 0.5]  # Pink for center point
+            else:
+                color = [0.5, 0.0, 1.0]  # Purple for intermediate points
+            
+            sphere.paint_uniform_color(color)
+            sphere.compute_vertex_normals()
+            
+            control_points.append({
+                'mesh': sphere,
+                'index': i,
+                'curve_index': idx,
+                'position': point.copy(),
+                'original_position': point.copy(),
+                'color': color,
+                'is_selected': False
+            })
+        
+        return control_points
+    
+    def update_ideal_arch_curve(self, new_curve_points):
+        """Update the visualization of the ideal arch curve."""
+        # Remove old curve visualization
+        if hasattr(self, 'ideal_curve_mesh') and self.ideal_curve_mesh is not None:
+            self.vis.remove_geometry(self.ideal_curve_mesh, reset_bounding_box=False)
+        
+        # Create new curve visualization
+        self.ideal_curve_mesh = self.create_ideal_arch_curve_mesh(new_curve_points)
+        if self.ideal_curve_mesh is not None:
+            self.vis.add_geometry(self.ideal_curve_mesh, reset_bounding_box=False)
+    
+    def highlight_selected_control_point(self, control_point_index):
+        """Highlight a selected control point for interaction."""
+        # Reset all control points to original colors
+        for cp in self.interactive_control_points:
+            cp['mesh'].paint_uniform_color(cp['color'])
+            cp['is_selected'] = False
+        
+        # Highlight the selected control point
+        if 0 <= control_point_index < len(self.interactive_control_points):
+            selected_cp = self.interactive_control_points[control_point_index]
+            selected_cp['mesh'].paint_uniform_color([1.0, 1.0, 0.0])  # Bright yellow
+            selected_cp['is_selected'] = True
+            self.selected_control_point = control_point_index
+    
+    def move_control_point(self, control_point_index, new_position):
+        """Move a control point to a new position and update the curve."""
+        if 0 <= control_point_index < len(self.interactive_control_points):
+            cp = self.interactive_control_points[control_point_index]
+            
+            # Update the control point position
+            cp['position'] = new_position.copy()
+            
+            # Move the visual mesh
+            translation = new_position - cp['mesh'].get_center()
+            cp['mesh'].translate(translation, relative=False)
+            cp['mesh'].translate(new_position)
+            
+            # Trigger curve recalculation (this would be handled by the wire generator)
+            if hasattr(self, 'wire_generator') and self.wire_generator is not None:
+                # The wire generator would recalculate the ideal curve based on new control points
+                pass

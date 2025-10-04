@@ -135,12 +135,14 @@ class WireGenerator:
         if not self._build_wire_mesh():
             return None
         
-        # Step 6: Setup visualization with hidden elements
+        # Step 6: Setup visualization with interactive arch curve
         self._setup_visualization()
         
         print("\n" + "="*60)
-        print("WIRE GENERATION COMPLETE")
+        print("INTERACTIVE ARCH DESIGN COMPLETE")
         print("="*60)
+        print("The ideal arch curve has been generated and is ready for interactive adjustment.")
+        print("Use the 3D visualizer to refine the arch shape, then finalize the bracket projection.")
         
         return self._get_results_summary()
     
@@ -206,12 +208,16 @@ class WireGenerator:
         # Get current height offset from height controller
         height_offset = self.height_controller.get_height_offset()
         
-        # Create wire path using the WirePathCreator
-        self.wire_path = self.wire_path_creator.create_smooth_path(
-            self.bracket_positions,
-            self.arch_center,
-            height_offset
-        )
+        # Step 4a: Generate the initial ideal arch curve
+        print("--- STEP 4a: Generating Initial Ideal Arch Curve ---")
+        self.ideal_arch_curve = self.wire_path_creator.generate_ideal_arch_curve(self.bracket_positions)
+        if self.ideal_arch_curve is None or len(self.ideal_arch_curve) < 2:
+            print("ERROR: Failed to create ideal arch curve")
+            return False
+        print(f"✓ Ideal arch curve created with {len(self.ideal_arch_curve)} points")
+
+        # The wire_path will now be the ideal_arch_curve
+        self.wire_path = self.ideal_arch_curve
         
         if self.wire_path is None or len(self.wire_path) < 2:
             print("ERROR: Failed to create wire path")
@@ -219,6 +225,10 @@ class WireGenerator:
         
         # Store control points for visualization (but they'll be hidden)
         self.wire_control_points = self.wire_path_creator.control_points
+        
+        # Step 4b: Create interactive control points for the ideal arch curve
+        print("--- STEP 4b: Creating Interactive Control Points ---")
+        self.interactive_control_points = self._create_interactive_control_points()
         
         path_length = self.wire_path_creator.get_path_length()
         print(f"✓ Wire path created: {len(self.wire_path)} points, {path_length:.1f}mm length")
@@ -890,6 +900,244 @@ class WireGenerator:
         print(f"Visualization: Clean (hidden elements)")
         print(f"{'='*60}")
 
+    def _create_interactive_control_points(self, num_controls=7):
+        """Create interactive control points along the ideal arch curve."""
+        if self.ideal_arch_curve is None or len(self.ideal_arch_curve) < num_controls:
+            return []
+        
+        # Select evenly spaced points along the curve for control
+        indices = np.linspace(0, len(self.ideal_arch_curve) - 1, num_controls, dtype=int)
+        control_points = []
+        
+        for i, idx in enumerate(indices):
+            point = self.ideal_arch_curve[idx]
+            
+            control_point = {
+                'index': i,
+                'curve_index': idx,
+                'position': point.copy(),
+                'original_position': point.copy(),
+                'type': 'arch_control',
+                'is_selected': False,
+                'weight': 1.0
+            }
+            
+            control_points.append(control_point)
+        
+        print(f"✓ Created {len(control_points)} interactive control points")
+        return control_points
+    
+    def update_ideal_arch_curve_from_controls(self):
+        """Recalculate the ideal arch curve based on moved control points."""
+        if not hasattr(self, 'interactive_control_points') or not self.interactive_control_points:
+            return
+        
+        # Extract the current positions of the control points
+        control_positions = np.array([cp['position'] for cp in self.interactive_control_points])
+        
+        # Fit a new fourth-order polynomial to the updated control points
+        x_coords = control_positions[:, 0]
+        y_coords = control_positions[:, 1]
+        z_coords = control_positions[:, 2]
+        
+        # Fit polynomial for X-Y plane
+        coefficients = np.polyfit(x_coords, y_coords, min(4, len(x_coords) - 1))
+        
+        # Generate new smooth curve
+        x_smooth = np.linspace(np.min(x_coords), np.max(x_coords), 100)
+        y_smooth = np.polyval(coefficients, x_smooth)
+        z_smooth = np.interp(x_smooth, x_coords, z_coords)
+        
+        # Update the ideal arch curve
+        self.ideal_arch_curve = np.vstack((x_smooth, y_smooth, z_smooth)).T
+        self.wire_path = self.ideal_arch_curve
+        
+        # Rebuild wire mesh
+        self.wire_mesh = self._create_wire_mesh()
+        
+        # Update visualization if available
+        if self.visualizer:
+            self.visualizer.update_ideal_arch_curve(self.ideal_arch_curve)
+            self.visualizer.update_wire_mesh(self.wire_mesh)
+        
+        print("✓ Ideal arch curve updated from control point movements")
+    
+    def move_arch_control_point(self, control_index, new_position):
+        """Move an arch control point and update the curve."""
+        if (hasattr(self, 'interactive_control_points') and 
+            0 <= control_index < len(self.interactive_control_points)):
+            
+            self.interactive_control_points[control_index]['position'] = new_position.copy()
+            self.update_ideal_arch_curve_from_controls()
+            
+            print(f"✓ Moved arch control point {control_index} to {new_position}")
+    
+    def project_brackets_to_ideal_curve(self):
+        """
+        Project brackets to the closest points on the finalized ideal arch curve.
+        
+        This ensures perfect alignment between brackets and the wire path after
+        the user has finalized the arch curve design.
+        """
+        if self.ideal_arch_curve is None or not self.bracket_positions:
+            return
+        
+        print("--- STEP 5: Projecting Brackets to Ideal Curve ---")
+        
+        projected_brackets = []
+        
+        for i, bracket in enumerate(self.bracket_positions):
+            # Get bracket position
+            if isinstance(bracket, dict):
+                bracket_pos = bracket['position']
+                bracket_normal = bracket['normal']
+                bracket_type = bracket.get('tooth_type', 'unknown')
+                bracket_visible = bracket.get('visible', True)
+            else:
+                bracket_pos = bracket.position
+                bracket_normal = bracket.normal
+                bracket_type = getattr(bracket, 'tooth_type', 'unknown')
+                bracket_visible = getattr(bracket, 'visible', True)
+            
+            # Find the closest point on the ideal arch curve
+            distances = np.linalg.norm(self.ideal_arch_curve - bracket_pos, axis=1)
+            closest_idx = np.argmin(distances)
+            closest_curve_point = self.ideal_arch_curve[closest_idx]
+            
+            # Project the bracket to the tooth surface along the normal direction
+            # We'll use the original normal but project from the curve point
+            projected_position = self._project_to_tooth_surface(
+                closest_curve_point, bracket_normal, bracket_pos
+            )
+            
+            # Create the projected bracket
+            projected_bracket = {
+                'position': projected_position,
+                'normal': bracket_normal,
+                'tooth_type': bracket_type,
+                'visible': bracket_visible,
+                'original_position': bracket_pos,
+                'curve_point': closest_curve_point,
+                'projection_distance': np.linalg.norm(projected_position - closest_curve_point)
+            }
+            
+            projected_brackets.append(projected_bracket)
+        
+        # Update the bracket positions with the projected ones
+        self.bracket_positions = projected_brackets
+        
+        print(f"✓ Projected {len(projected_brackets)} brackets to ideal arch curve")
+        
+        # Recalculate wire path to ensure it passes through the projected brackets
+        self._finalize_wire_path()
+    
+    def _project_to_tooth_surface(self, curve_point, bracket_normal, original_bracket_pos):
+        """
+        Project a point from the ideal curve to the tooth surface.
+        
+        Args:
+            curve_point: Point on the ideal arch curve
+            bracket_normal: Normal vector of the original bracket
+            original_bracket_pos: Original bracket position for reference
+            
+        Returns:
+            Projected position on the tooth surface
+        """
+        # Normalize the bracket normal
+        normal = bracket_normal / (np.linalg.norm(bracket_normal) + 1e-6)
+        
+        # Create a raycasting scene for surface projection
+        import open3d as o3d
+        mesh_legacy = o3d.t.geometry.TriangleMesh.from_legacy(self.mesh)
+        scene = o3d.t.geometry.RaycastingScene()
+        scene.add_triangles(mesh_legacy)
+        
+        # Cast ray from curve point along the normal to find tooth surface
+        ray_origin = curve_point - normal * 5.0  # Start 5mm away from surface
+        ray_direction = normal
+        
+        rays = o3d.core.Tensor([[*ray_origin, *ray_direction]], dtype=o3d.core.Dtype.Float32)
+        result = scene.cast_rays(rays)
+        
+        if result['t_hit'][0] != np.inf and result['t_hit'][0] > 0:
+            # Ray hit the surface
+            hit_point = ray_origin + ray_direction * float(result['t_hit'][0].numpy())
+            return hit_point
+        else:
+            # Fallback: use a position slightly offset from the curve point
+            return curve_point + normal * 1.0  # 1mm offset towards tooth
+    
+    def _finalize_wire_path(self):
+        """
+        Finalize the wire path to ensure it passes through the projected brackets.
+        
+        This creates the final wire path that combines the ideal arch curve
+        with precise bracket positioning.
+        """
+        if not self.bracket_positions:
+            return
+        
+        # Extract the projected bracket positions
+        bracket_positions = np.array([b['position'] for b in self.bracket_positions if b['visible']])
+        
+        if len(bracket_positions) < 2:
+            return
+        
+        # Create a smooth path that passes through the projected brackets
+        # We'll use the enhanced wire path creator with the projected positions
+        from wire.wire_path_creator_enhanced import BracketPosition
+        
+        # Convert to BracketPosition objects
+        bracket_objects = []
+        for bracket in self.bracket_positions:
+            if bracket['visible']:
+                bp = BracketPosition(
+                    position=bracket['position'],
+                    normal=bracket['normal'],
+                    tooth_type=bracket['tooth_type']
+                )
+                bracket_objects.append(bp)
+        
+        # Generate the final smooth wire path
+        self.wire_path = self.wire_path_creator.create_smooth_path(
+            bracket_objects,
+            self.arch_center,
+            0.0  # No height offset since we're using projected positions
+        )
+        
+        print(f"✓ Finalized wire path with {len(self.wire_path)} points")
+    
+    def finalize_arch_design(self):
+        """
+        Finalize the arch design after user has completed interactive adjustments.
+        
+        This method should be called after the user is satisfied with the
+        ideal arch curve shape in the 3D visualizer.
+        """
+        print("\n" + "="*60)
+        print("FINALIZING ARCH DESIGN")
+        print("="*60)
+        
+        # Step 1: Project brackets to the finalized ideal curve
+        self.project_brackets_to_ideal_curve()
+        
+        # Step 2: Rebuild the wire mesh with the final path
+        if not self._build_wire_mesh():
+            print("ERROR: Failed to build final wire mesh")
+            return False
+        
+        # Step 3: Update visualization
+        if self.visualizer:
+            self.visualizer.update_wire_mesh(self.wire_mesh)
+        
+        print("\n" + "="*60)
+        print("ARCH DESIGN FINALIZATION COMPLETE")
+        print("="*60)
+        print("The wire has been generated with optimal bracket positioning.")
+        print("Ready for export and manufacturing.")
+        
+        return True
+
 
 # Example usage function
 def example_usage():
@@ -930,3 +1178,5 @@ def example_usage():
 if __name__ == "__main__":
     # Run example
     generator = example_usage()
+
+

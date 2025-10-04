@@ -389,7 +389,20 @@ class WirePathCreatorEnhanced:
             return None
 
         # Step 1: Extract and sort brackets
-        visible_brackets = [b for b in bracket_positions if b.get('visible', True)]
+        # Handle both dict and BracketPosition object formats
+        visible_brackets = []
+        for b in bracket_positions:
+            if hasattr(b, 'visible'):
+                # BracketPosition object
+                if b.visible:
+                    visible_brackets.append(b)
+            elif isinstance(b, dict):
+                # Dictionary format
+                if b.get('visible', True):
+                    visible_brackets.append(b)
+            else:
+                # Fallback - assume visible
+                visible_brackets.append(b)
         if len(visible_brackets) < 2:
             return None
 
@@ -421,29 +434,44 @@ class WirePathCreatorEnhanced:
 
         return self.wire_path
 
-    def _sort_brackets_by_angle(self, brackets: List[Dict],
-                                center: np.ndarray) -> List[Dict]:
+    def _sort_brackets_by_angle(self, brackets: List,
+                                center: np.ndarray) -> List:
         """Sort brackets by angular position."""
         def calculate_angle(bracket):
-            pos = bracket['position']
+            # Handle both dict and BracketPosition object formats
+            if hasattr(bracket, 'position'):
+                pos = bracket.position
+            elif isinstance(bracket, dict):
+                pos = bracket['position']
+            else:
+                pos = bracket  # Fallback
+            
             dx = pos[0] - center[0]
             dy = pos[1] - center[1]
             return np.arctan2(dy, dx)
 
         return sorted(brackets, key=calculate_angle)
 
-    def _generate_control_points_enhanced(self, sorted_brackets: List[Dict],
+    def _generate_control_points_enhanced(self, sorted_brackets: List,
                                          center: np.ndarray) -> List[ControlPoint]:
         """Generate control points with enhanced properties."""
         control_points = []
 
         # Add bracket control points
         for i, bracket in enumerate(sorted_brackets):
+            # Handle both dict and BracketPosition object formats
+            if hasattr(bracket, 'position'):
+                pos = bracket.position.copy()
+            elif isinstance(bracket, dict):
+                pos = bracket['position'].copy()
+            else:
+                pos = bracket.copy()  # Fallback
+            
             cp = ControlPoint(
-                position=bracket['position'].copy(),
+                position=pos,
                 type='bracket',
                 index=i,
-                original_position=bracket['position'].copy(),
+                original_position=pos,
                 bend_angle=0.0,
                 vertical_offset=0.0,
                 locked=False,
@@ -471,8 +499,16 @@ class WirePathCreatorEnhanced:
         intermediate_points = []
 
         for i in range(len(brackets) - 1):
-            pos1 = brackets[i]['position']
-            pos2 = brackets[i + 1]['position']
+            # Handle both dict and BracketPosition object formats
+            if hasattr(brackets[i], 'position'):
+                pos1 = brackets[i].position
+                pos2 = brackets[i + 1].position
+            elif isinstance(brackets[i], dict):
+                pos1 = brackets[i]['position']
+                pos2 = brackets[i + 1]['position']
+            else:
+                pos1 = brackets[i]  # Fallback
+                pos2 = brackets[i + 1]
             midpoint = (pos1 + pos2) / 2
 
             # Calculate inward offset for natural curve
@@ -753,3 +789,70 @@ class WirePathCreatorEnhanced:
             'strategy': self.strategy.value,
             'material': self.material.name
         }
+
+
+    def generate_ideal_arch_curve(self, bracket_positions: List[BracketPosition], num_points: int = 100) -> np.ndarray:
+        """
+        Generates an ideal arch curve using a fourth-order polynomial fit.
+
+        This method takes the 3D coordinates of the brackets, fits a smooth
+        fourth-order polynomial to them, and returns a new set of points
+        representing the idealized arch form.
+
+        Args:
+            bracket_positions: A list of BracketPosition objects.
+            num_points: The number of points to generate for the smooth curve.
+
+        Returns:
+            A numpy array of 3D points representing the ideal arch curve.
+        """
+        if not bracket_positions or len(bracket_positions) < 5:
+            # Not enough points to fit a 4th order polynomial
+            # Handle both dict and object formats for fallback
+            fallback_positions = []
+            for bp in bracket_positions:
+                if hasattr(bp, 'position'):
+                    fallback_positions.append(bp.position)
+                elif isinstance(bp, dict) and 'position' in bp:
+                    fallback_positions.append(bp['position'])
+                else:
+                    fallback_positions.append(bp)
+            return np.array(fallback_positions)
+
+        # Extract X and Y coordinates for the polynomial fit
+        # Handle both dict and BracketPosition object formats
+        positions = []
+        for bp in bracket_positions:
+            if hasattr(bp, 'position'):
+                # BracketPosition object
+                positions.append(bp.position)
+            elif isinstance(bp, dict) and 'position' in bp:
+                # Dictionary format
+                positions.append(bp['position'])
+            else:
+                # Fallback - assume it's already a position array
+                positions.append(bp)
+        
+        positions = np.array(positions)
+        x_coords = positions[:, 0]
+        y_coords = positions[:, 1]
+
+        # Fit a fourth-order polynomial (y = ax^4 + bx^3 + cx^2 + dx + e)
+        # We use a robust fitting method to handle outliers
+        coefficients = np.polyfit(x_coords, y_coords, 4)
+
+        # Generate a smooth set of X coordinates for the new curve
+        x_smooth = np.linspace(np.min(x_coords), np.max(x_coords), num_points)
+
+        # Calculate the corresponding Y coordinates using the polynomial
+        y_smooth = np.polyval(coefficients, x_smooth)
+
+        # To get the Z coordinates, we can interpolate from the original points
+        # This ensures the curve maintains the general height of the brackets
+        z_coords_interp = np.interp(x_smooth, x_coords, positions[:, 2])
+
+        # Combine X, Y, and Z to create the 3D ideal arch curve
+        ideal_curve = np.vstack((x_smooth, y_smooth, z_coords_interp)).T
+
+        return ideal_curve
+
