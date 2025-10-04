@@ -26,9 +26,10 @@ class WireAdjustmentOptimizer:
     - Incremental position updates
     """
 
-    def __init__(self, mesh: o3d.geometry.TriangleMesh):
-        """Initialize optimizer with mesh."""
+    def __init__(self, mesh: o3d.geometry.TriangleMesh, arch_type: str = 'upper'):
+        """Initialize optimizer with mesh and arch type."""
         self.mesh = mesh
+        self.arch_type = arch_type
         self.raycasting_scene = None
         self.mesh_legacy = None
         self._initialize_raycasting_scene()
@@ -78,10 +79,16 @@ class WireAdjustmentOptimizer:
             hit_pos = ray_origin_inside + ray_dir_outward * float(result['t_hit'][0].numpy())
             valid_hits.append(hit_pos)
 
-        # Return closest hit to target
+        # Choose hit closest to gums (upper surface in vertical direction)
+        # For upper arch: prefer higher Z (toward palate/gums)
+        # For lower arch: prefer lower Z (toward floor of mouth/gums)
         if valid_hits:
-            distances = [np.linalg.norm(hit - target_pos) for hit in valid_hits]
-            return valid_hits[np.argmin(distances)]
+            if self.arch_type == 'upper':
+                # Upper arch: higher Z = closer to gums
+                return valid_hits[np.argmax([hit[2] for hit in valid_hits])]
+            else:
+                # Lower arch: lower Z = closer to gums
+                return valid_hits[np.argmin([hit[2] for hit in valid_hits])]
 
         # Ultimate fallback: interpolate between orig and target
         return orig_pos + (target_pos - orig_pos) * 0.7
@@ -113,7 +120,8 @@ def add_optimized_adjustment_methods(wire_generator_instance):
 
     # Create optimizer
     wire_generator_instance._adjustment_optimizer = WireAdjustmentOptimizer(
-        wire_generator_instance.mesh
+        wire_generator_instance.mesh,
+        wire_generator_instance.arch_type
     )
 
     # Store original methods

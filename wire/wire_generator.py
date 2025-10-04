@@ -626,10 +626,16 @@ class WireGenerator:
                 hit_pos = ray_origin + ray_dir * float(result['t_hit'][0].numpy())
                 valid_hits.append(hit_pos)
 
-        # Choose the hit closest to target position
+        # Choose hit closest to gums (upper surface in vertical direction)
+        # For upper arch: prefer higher Z (toward palate/gums)
+        # For lower arch: prefer lower Z (toward floor of mouth/gums)
         if valid_hits:
-            distances = [np.linalg.norm(hit - target_pos) for hit in valid_hits]
-            best_hit = valid_hits[np.argmin(distances)]
+            if self.arch_type == 'upper':
+                # Upper arch: higher Z = closer to gums
+                best_hit = valid_hits[np.argmax([hit[2] for hit in valid_hits])]
+            else:
+                # Lower arch: lower Z = closer to gums
+                best_hit = valid_hits[np.argmin([hit[2] for hit in valid_hits])]
             return best_hit
 
         return None
