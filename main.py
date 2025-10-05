@@ -12,14 +12,12 @@ from wire.wire_generator import WireGenerator
 app = FastAPI(
     title="Orthodontic Wire Generator API",
     description="A web API for generating, visualizing, and exporting orthodontic wires.",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # In-memory storage for the wire generator instance.
-# This is a simple approach for this specific problem. For a real-world application,
-# you would want to manage state more robustly (e.g., sessions, databases).
 generator_instance: Optional[WireGenerator] = None
 
 # --- Helper Functions ---
@@ -47,13 +45,16 @@ class AdjustWirePayload(BaseModel):
     control_point_index: int
     new_coordinates: List[float]
 
+class IncrementalAdjustPayload(BaseModel):
+    y_offset: float = 0.0
+    z_offset: float = 0.0
+
 # --- API Endpoints ---
 
 @app.post("/api/upload", summary="Upload STL file")
 async def upload_stl(file: UploadFile = File(...)):
     """
     Accepts an .stl file, saves it, and initializes the `WireGenerator`.
-    This is the first step in the process.
     """
     global generator_instance
     upload_dir = "STLfiles"
@@ -66,7 +67,6 @@ async def upload_stl(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
-    # Initialize the generator with the new file
     try:
         generator_instance = WireGenerator(stl_path=file_path)
         return {"filename": file.filename, "message": "File uploaded and wire generator initialized."}
@@ -84,7 +84,7 @@ async def generate_wire():
     try:
         results = generator.generate_wire()
         if not results:
-            raise HTTPException(status_code=500, detail="Wire generation failed for an unknown reason.")
+            raise HTTPException(status_code=500, detail="Wire generation failed.")
 
         jaw_mesh_json = mesh_to_json(results.get('mesh'))
         wire_mesh_json = mesh_to_json(results.get('wire_mesh'))
@@ -101,63 +101,32 @@ async def generate_wire():
         raise HTTPException(status_code=500, detail=f"An error occurred during wire generation: {e}")
 
 
-@app.post("/api/adjust-wire", summary="Adjust Wire Control Point")
-async def adjust_wire(payload: AdjustWirePayload):
+@app.post("/api/adjust-wire-position", summary="Adjust Wire Position Incrementally")
+async def adjust_wire_position(payload: IncrementalAdjustPayload):
     """
-    Accepts new coordinates for a single control point and returns the
-    updated wire geometry.
+    Adjusts the wire position up/down (Y) or forward/backward (Z)
+    and returns the updated wire geometry.
     """
     generator = get_generator()
-    wpc = generator.wire_path_creator
-
-    if not hasattr(wpc, 'control_points') or not wpc.control_points:
-        raise HTTPException(status_code=400, detail="Control points not available. Please generate the wire first.")
-
-    index = payload.control_point_index
-    if not 0 <= index < len(wpc.control_points):
-        raise HTTPException(status_code=404, detail="Control point index out of bounds.")
-
-    cp = wpc.control_points[index]
-    cp_type = cp.type if hasattr(cp, 'type') else cp.get('type')
-
-    if cp_type == 'bracket':
-        raise HTTPException(status_code=400, detail="Cannot move a 'bracket' type control point directly.")
-
-    # Update the position of the control point
-    new_pos = np.array(payload.new_coordinates)
-    if hasattr(cp, 'position'):
-        cp.position = new_pos
-    else:
-        cp['position'] = new_pos
-
-    # Regenerate the wire path and mesh with the updated control point
     try:
-        height_offset = generator.height_controller.get_height_offset()
-        new_wire_path = wpc.create_smooth_path(
-            generator.bracket_positions,
-            generator.arch_center,
-            height_offset
-        )
-        generator.wire_path = new_wire_path
+        generator.adjust_wire_position(y_offset=payload.y_offset, z_offset=payload.z_offset)
 
-        new_wire_mesh = generator.wire_mesh_builder.build_wire_mesh(new_wire_path)
-        if new_wire_mesh is None:
-            raise HTTPException(status_code=500, detail="Failed to rebuild wire mesh after adjustment.")
-
-        generator.wire_mesh = new_wire_mesh
+        updated_wire_mesh = generator.wire_mesh
+        if updated_wire_mesh is None:
+            raise HTTPException(status_code=500, detail="Failed to get updated wire mesh after adjustment.")
 
         return {
-            "wire_mesh": mesh_to_json(new_wire_mesh),
-            "message": "Wire adjusted successfully."
+            "wire_mesh": mesh_to_json(updated_wire_mesh),
+            "message": "Wire position adjusted successfully."
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to adjust wire: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to adjust wire position: {e}")
 
 
-@app.get("/api/export-gcode", summary="Export G-code")
-async def export_gcode():
+@app.get("/api/export-gcode", summary="Get G-code")
+async def get_gcode():
     """
-    Generates G-code for the current wire and returns it as a downloadable file.
+    Generates G-code for the current wire and returns it as a JSON object.
     """
     generator = get_generator()
     if generator.wire_path is None:
@@ -165,20 +134,15 @@ async def export_gcode():
 
     try:
         gcode_content = generator.generate_gcode()
-        return Response(
-            content=gcode_content,
-            media_type="text/plain",
-            headers={"Content-Disposition": "attachment; filename=wire.gcode"}
-        )
+        return {"filename": "wire.gcode", "content": gcode_content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate G-code: {e}")
 
 
-@app.get("/api/export-esp32", summary="Export ESP32 Code")
-async def export_esp32():
+@app.get("/api/export-esp32", summary="Get ESP32 Code")
+async def get_esp32_code():
     """
-    Generates ESP32 Arduino code for the current wire and returns it as a
-    downloadable file.
+    Generates ESP32 Arduino code for the current wire and returns it as a JSON object.
     """
     generator = get_generator()
     if generator.wire_path is None:
@@ -186,11 +150,7 @@ async def export_esp32():
 
     try:
         esp32_code = generator.generate_esp32_code()
-        return Response(
-            content=esp32_code,
-            media_type="text/x-arduino",
-            headers={"Content-Disposition": "attachment; filename=wire_esp32.ino"}
-        )
+        return {"filename": "wire_esp32.ino", "content": esp32_code}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate ESP32 code: {e}")
 

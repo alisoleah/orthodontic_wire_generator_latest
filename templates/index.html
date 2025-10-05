@@ -29,5 +29,15 @@
         }
     </script>
     <script type="module" src="/static/main.js"></script>
+
+    <!-- Code Viewer Modal -->
+    <div id="code-modal" class="modal-hidden">
+        <div class="modal-content">
+            <span class="modal-close-btn">&times;</span>
+            <h3 id="code-title">Generated Code</h3>
+            <pre><code id="code-display"></code></pre>
+            <button id="copy-code-btn">Copy to Clipboard</button>
+        </div>
+    </div>
 </body>
 </html>

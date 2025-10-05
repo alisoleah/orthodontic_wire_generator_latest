@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Element Selectors ---
     const uploadBtn = document.getElementById('upload-btn');
     const fileInput = document.getElementById('file-input');
     const generateBtn = document.getElementById('generate-btn');
@@ -9,46 +10,39 @@ document.addEventListener('DOMContentLoaded', () => {
     const exportEsp32Btn = document.getElementById('export-esp32-btn');
     const statusDiv = document.getElementById('status');
     const viewerDiv = document.getElementById('viewer');
+    const codeModal = document.getElementById('code-modal');
+    const modalCloseBtn = document.querySelector('.modal-close-btn');
+    const codeTitle = document.getElementById('code-title');
+    const codeDisplay = document.getElementById('code-display');
+    const copyCodeBtn = document.getElementById('copy-code-btn');
 
     let scene, camera, renderer, controls;
     let jawMesh, wireMesh;
 
     // --- 3D Viewer Initialization ---
     function initViewer() {
-        // Scene
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x2c3e50);
-
-        // Camera
         camera = new THREE.PerspectiveCamera(75, viewerDiv.clientWidth / viewerDiv.clientHeight, 0.1, 1000);
         camera.position.set(0, 0, 80);
-
-        // Renderer
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(viewerDiv.clientWidth, viewerDiv.clientHeight);
         viewerDiv.appendChild(renderer.domElement);
-
-        // Controls
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.1;
-
-        // Lighting
+        controls.listenToKeyEvents(window);
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(50, 50, 50);
         scene.add(directionalLight);
-
-        // Animation loop
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
         }
         animate();
-
-        // Handle window resize
         window.addEventListener('resize', () => {
             camera.aspect = viewerDiv.clientWidth / viewerDiv.clientHeight;
             camera.updateProjectionMatrix();
@@ -56,13 +50,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Status Update Function ---
+    // --- Status & State Management ---
     function updateStatus(message, isError = false) {
         statusDiv.textContent = message;
         statusDiv.style.color = isError ? 'red' : 'black';
     }
 
-    // --- Button State Management ---
     function setButtonsState(isUploading, isGenerated) {
         uploadBtn.disabled = isUploading;
         generateBtn.disabled = isUploading || isGenerated;
@@ -70,24 +63,16 @@ document.addEventListener('DOMContentLoaded', () => {
         exportEsp32Btn.disabled = isUploading || !isGenerated;
     }
 
-    // --- Mesh Creation ---
+    // --- Mesh & Scene Management ---
     function createMeshFromJson(meshData, color) {
         if (!meshData || !meshData.vertices || !meshData.faces) return null;
-
         const geometry = new THREE.BufferGeometry();
         const vertices = new Float32Array(meshData.vertices.flat());
         const indices = new Uint32Array(meshData.faces.flat());
-
         geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
         geometry.setIndex(new THREE.BufferAttribute(indices, 1));
         geometry.computeVertexNormals();
-
-        const material = new THREE.MeshStandardMaterial({
-            color: color,
-            metalness: 0.3,
-            roughness: 0.6,
-        });
-
+        const material = new THREE.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.6 });
         return new THREE.Mesh(geometry, material);
     }
 
@@ -106,31 +91,57 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Event Listeners ---
+    function updateWireMesh(meshData) {
+        if (wireMesh) {
+            scene.remove(wireMesh);
+            wireMesh.geometry.dispose();
+            wireMesh.material.dispose();
+        }
+        wireMesh = createMeshFromJson(meshData, 0xffd700);
+        if (wireMesh) scene.add(wireMesh);
+    }
+
+    // --- Code Modal Logic ---
+    function showCodeModal(title, code) {
+        codeTitle.textContent = title;
+        codeDisplay.textContent = code;
+        codeModal.classList.remove('modal-hidden');
+        codeModal.classList.add('modal-visible');
+    }
+
+    function hideCodeModal() {
+        codeModal.classList.remove('modal-visible');
+        codeModal.classList.add('modal-hidden');
+    }
+
+    modalCloseBtn.addEventListener('click', hideCodeModal);
+    codeModal.addEventListener('click', (event) => {
+        if (event.target === codeModal) hideCodeModal();
+    });
+
+    copyCodeBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(codeDisplay.textContent).then(() => {
+            updateStatus('Code copied to clipboard!');
+            setTimeout(() => updateStatus(''), 2000);
+        }).catch(err => {
+            updateStatus(`Error copying code: ${err}`, true);
+        });
+    });
+
+    // --- API Interactions ---
     uploadBtn.addEventListener('click', () => fileInput.click());
 
     fileInput.addEventListener('change', async (event) => {
         const file = event.target.files[0];
         if (!file) return;
-
         updateStatus('Uploading STL file...');
         setButtonsState(true, false);
         clearScene();
-
         const formData = new FormData();
         formData.append('file', file);
-
         try {
-            const response = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Upload failed');
-            }
-
+            const response = await fetch('/api/upload', { method: 'POST', body: formData });
+            if (!response.ok) throw new Error((await response.json()).detail || 'Upload failed');
             const result = await response.json();
             updateStatus(result.message);
             setButtonsState(false, false);
@@ -145,47 +156,24 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus('Generating wire...');
         setButtonsState(true, false);
         clearScene();
-
         try {
-            const response = await fetch('/api/generate-wire', {
-                method: 'POST',
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Generation failed');
-            }
-
+            const response = await fetch('/api/generate-wire', { method: 'POST' });
+            if (!response.ok) throw new Error((await response.json()).detail || 'Generation failed');
             const result = await response.json();
             updateStatus(result.message);
-
-            // Create and add jaw mesh
             jawMesh = createMeshFromJson(result.jaw_mesh, 0xe0e0e0);
-            if (jawMesh) {
-                scene.add(jawMesh);
-            }
-
-            // Create and add wire mesh
-            wireMesh = createMeshFromJson(result.wire_mesh, 0xffd700); // Gold color
-            if (wireMesh) {
-                scene.add(wireMesh);
-            }
-
-            // Fit camera to the new objects
+            if (jawMesh) scene.add(jawMesh);
+            updateWireMesh(result.wire_mesh);
             const box = new THREE.Box3().setFromObject(jawMesh || wireMesh);
             const center = box.getCenter(new THREE.Vector3());
             const size = box.getSize(new THREE.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
             const fov = camera.fov * (Math.PI / 180);
-            let cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2));
-            cameraZ *= 1.5; // Zoom out a bit
-
+            const cameraZ = Math.abs(maxDim / 2 * Math.tan(fov * 2)) * 1.5;
             camera.position.set(center.x, center.y, center.z + cameraZ);
             controls.target.copy(center);
             controls.update();
-
             setButtonsState(false, true);
-
         } catch (error) {
             updateStatus(`Error: ${error.message}`, true);
             setButtonsState(false, false);
@@ -193,34 +181,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    async function handleExport(url, filename) {
-        updateStatus(`Exporting ${filename}...`);
+    async function handleWireAdjustment(y_offset = 0, z_offset = 0) {
+        if (!wireMesh) return;
+        updateStatus('Adjusting wire position...');
         try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Export failed');
-            }
-            const blob = await response.blob();
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            updateStatus(`${filename} exported successfully.`);
+            const response = await fetch('/api/adjust-wire-position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ y_offset, z_offset }),
+            });
+            if (!response.ok) throw new Error((await response.json()).detail || 'Adjustment failed');
+            const result = await response.json();
+            updateWireMesh(result.wire_mesh);
+            updateStatus('Wire position adjusted.');
         } catch (error) {
             updateStatus(`Error: ${error.message}`, true);
         }
     }
 
-    exportGcodeBtn.addEventListener('click', () => {
-        handleExport('/api/export-gcode', 'wire.gcode');
+    window.addEventListener('keydown', (event) => {
+        if (!wireMesh || document.activeElement !== renderer.domElement) return;
+        event.preventDefault();
+        const step = 0.2;
+        switch (event.key) {
+            case 'ArrowUp': handleWireAdjustment(step, 0); break;
+            case 'ArrowDown': handleWireAdjustment(-step, 0); break;
+            case 'ArrowLeft': handleWireAdjustment(0, -step); break;
+            case 'ArrowRight': handleWireAdjustment(0, step); break;
+        }
     });
 
-    exportEsp32Btn.addEventListener('click', () => {
-        handleExport('/api/export-esp32', 'wire_esp32.ino');
-    });
+    async function fetchAndShowCode(url, title) {
+        updateStatus(`Fetching ${title}...`);
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error((await response.json()).detail || 'Failed to fetch code');
+            const data = await response.json();
+            showCodeModal(data.filename, data.content);
+            updateStatus(`${title} loaded.`);
+        } catch (error) {
+            updateStatus(`Error: ${error.message}`, true);
+        }
+    }
+
+    exportGcodeBtn.addEventListener('click', () => fetchAndShowCode('/api/export-gcode', 'G-code'));
+    exportEsp32Btn.addEventListener('click', () => fetchAndShowCode('/api/export-esp32', 'ESP32 Code'));
 
     // --- Initial State ---
     initViewer();
