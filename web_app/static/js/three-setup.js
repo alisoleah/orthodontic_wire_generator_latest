@@ -72,7 +72,16 @@ class ThreeViewer {
     }
     
     setupControls() {
-        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        // Handle different Three.js versions for OrbitControls
+        if (typeof THREE.OrbitControls !== 'undefined') {
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        } else if (window.OrbitControls) {
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        } else {
+            console.warn('OrbitControls not available');
+            return;
+        }
+        
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         this.controls.screenSpacePanning = false;

@@ -49,6 +49,10 @@ class WireGeneratorSession:
             self.stl_path = stl_path
             self.generator = WireGenerator(stl_path, arch_type, wire_size)
             self.status = "stl_loaded"
+            
+            # Extract mesh data immediately after loading
+            self._extract_mesh_data()
+            
             return True
         except Exception as e:
             print(f"Error loading STL: {e}")
@@ -75,18 +79,50 @@ class WireGeneratorSession:
     def _extract_mesh_data(self):
         """Extract mesh data for Three.js rendering."""
         try:
-            if self.generator and self.generator.mesh:
-                mesh = self.generator.mesh
-                vertices = np.asarray(mesh.vertices)
-                triangles = np.asarray(mesh.triangles)
-                
-                self.mesh_data = {
-                    'vertices': vertices.tolist(),
-                    'faces': triangles.tolist(),
-                    'center': self.generator.arch_center.tolist() if hasattr(self.generator, 'arch_center') else [0, 0, 0]
-                }
+            # Load mesh using the mesh processor
+            if self.generator and self.generator.mesh_processor:
+                mesh = self.generator.mesh_processor.load_stl(self.stl_path)
+                if mesh:
+                    # Clean the mesh
+                    mesh = self.generator.mesh_processor.clean_mesh(mesh)
+                    
+                    vertices = np.asarray(mesh.vertices)
+                    triangles = np.asarray(mesh.triangles)
+                    
+                    # Optimize mesh for web rendering - reduce complexity if too large
+                    max_vertices = 20000  # Reasonable limit for web rendering
+                    if len(vertices) > max_vertices:
+                        print(f"Mesh too large ({len(vertices)} vertices), simplifying...")
+                        
+                        # Simplify mesh using Open3D
+                        target_triangles = int(len(triangles) * (max_vertices / len(vertices)))
+                        simplified_mesh = mesh.simplify_quadric_decimation(target_triangles)
+                        
+                        vertices = np.asarray(simplified_mesh.vertices)
+                        triangles = np.asarray(simplified_mesh.triangles)
+                        
+                        print(f"Mesh simplified to {len(vertices)} vertices, {len(triangles)} faces")
+                    
+                    # Calculate center
+                    center = vertices.mean(axis=0) if len(vertices) > 0 else [0, 0, 0]
+                    
+                    self.mesh_data = {
+                        'vertices': vertices.tolist(),
+                        'faces': triangles.tolist(),
+                        'center': center.tolist()
+                    }
+                    
+                    print(f"✓ Mesh data extracted: {len(vertices)} vertices, {len(triangles)} faces")
+                else:
+                    print("❌ Failed to load mesh")
+                    self.mesh_data = None
+            else:
+                print("❌ No mesh processor available")
+                self.mesh_data = None
         except Exception as e:
             print(f"Error extracting mesh data: {e}")
+            import traceback
+            traceback.print_exc()
             self.mesh_data = None
     
     def _extract_wire_data(self):
@@ -261,8 +297,23 @@ def get_mesh_data():
     try:
         user_session = get_session()
         
+        print(f"Debug - Session status: {user_session.status}")
+        print(f"Debug - Mesh data available: {user_session.mesh_data is not None}")
+        print(f"Debug - Generator available: {user_session.generator is not None}")
+        
         if not user_session.mesh_data:
-            return jsonify({'error': 'No mesh data available'}), 404
+            # Try to extract mesh data if we have a generator but no mesh data
+            if user_session.generator and user_session.stl_path:
+                print("Debug - Attempting to re-extract mesh data")
+                user_session._extract_mesh_data()
+                
+                if user_session.mesh_data:
+                    print("Debug - Mesh data re-extracted successfully")
+                else:
+                    print("Debug - Failed to re-extract mesh data")
+                    return jsonify({'error': 'Failed to extract mesh data'}), 500
+            else:
+                return jsonify({'error': 'No mesh data available'}), 404
         
         return jsonify({
             'success': True,
