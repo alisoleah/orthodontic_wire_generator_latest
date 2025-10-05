@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', () => {
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.1;
+        // We let OrbitControls listen to keys by default, and we will programmatically
+        // enable/disable its panning to avoid conflicts with our custom key-bindings.
         controls.listenToKeyEvents(window);
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
@@ -137,6 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus('Uploading STL file...');
         setButtonsState(true, false);
         clearScene();
+        controls.enablePan = true; // Re-enable camera panning
         const formData = new FormData();
         formData.append('file', file);
         try {
@@ -160,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/generate-wire', { method: 'POST' });
             if (!response.ok) throw new Error((await response.json()).detail || 'Generation failed');
             const result = await response.json();
-            updateStatus(result.message);
+
             jawMesh = createMeshFromJson(result.jaw_mesh, 0xe0e0e0);
             if (jawMesh) scene.add(jawMesh);
             updateWireMesh(result.wire_mesh);
@@ -173,11 +176,16 @@ document.addEventListener('DOMContentLoaded', () => {
             camera.position.set(center.x, center.y, center.z + cameraZ);
             controls.target.copy(center);
             controls.update();
+
             setButtonsState(false, true);
+            controls.enablePan = false; // Disable camera panning to enable wire adjustment
+            updateStatus("Wire generated. Use arrow keys to adjust position.");
+
         } catch (error) {
             updateStatus(`Error: ${error.message}`, true);
             setButtonsState(false, false);
             generateBtn.disabled = false;
+            controls.enablePan = true; // Re-enable pan on error
         }
     });
 
@@ -200,14 +208,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.addEventListener('keydown', (event) => {
-        if (!wireMesh || document.activeElement !== renderer.domElement) return;
-        event.preventDefault();
-        const step = 0.2;
-        switch (event.key) {
-            case 'ArrowUp': handleWireAdjustment(step, 0); break;
-            case 'ArrowDown': handleWireAdjustment(-step, 0); break;
-            case 'ArrowLeft': handleWireAdjustment(0, -step); break;
-            case 'ArrowRight': handleWireAdjustment(0, step); break;
+        // If a wire exists and camera panning is disabled, use arrow keys for adjustment.
+        if (!wireMesh || controls.enablePan) return;
+
+        const keyMap = {
+            'ArrowUp': { y: 0.2, z: 0 },
+            'ArrowDown': { y: -0.2, z: 0 },
+            'ArrowLeft': { y: 0, z: -0.2 },
+            'ArrowRight': { y: 0, z: 0.2 },
+        };
+
+        if (keyMap[event.key]) {
+            event.preventDefault(); // Prevent scrolling
+            const { y, z } = keyMap[event.key];
+            handleWireAdjustment(y, z);
         }
     });
 
