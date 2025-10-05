@@ -1,1 +1,5 @@
 \n# Ignore user-uploaded test files\nSTLfiles/\n\n# Ignore temporary verification files\njules-scratch/
+
+# Python cache
+__pycache__/
+*.pyc
