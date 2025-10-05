@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orthodontic Wire Generator - FIXR-Inspired</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <h1 class="app-title">
+                    <span class="title-main">Orthodontic Wire Generator</span>
+                    <span class="title-sub">FIXR-Inspired Surface Adaptation</span>
+                </h1>
+                <div class="status-indicator">
+                    <span id="status-text">Ready</span>
+                    <div id="status-dot" class="status-dot status-ready"></div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <div class="panel-section">
+                    <h3>1. Upload STL Model</h3>
+                    <div class="upload-area" id="upload-area">
+                        <div class="upload-content">
+                            <div class="upload-icon">📁</div>
+                            <p>Drop STL file here or click to browse</p>
+                            <input type="file" id="file-input" accept=".stl" hidden>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="arch-type">Arch Type:</label>
+                        <select id="arch-type">
+                            <option value="upper">Upper</option>
+                            <option value="lower">Lower</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="wire-size">Wire Size:</label>
+                        <select id="wire-size">
+                            <option value="0.016">0.016"</option>
+                            <option value="0.018" selected>0.018"</option>
+                            <option value="0.020">0.020"</option>
+                            <option value="0.022">0.022"</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3>2. Generate Wire</h3>
+                    <button id="generate-wire-btn" class="btn btn-primary" disabled>
+                        Generate FIXR-Style Wire
+                    </button>
+                    <div id="generation-info" class="info-text" style="display: none;">
+                        <p><strong>FA Points:</strong> <span id="fa-points-count">0</span></p>
+                        <p><strong>Control Points:</strong> <span id="control-points-count">0</span></p>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3>3. Interactive Controls</h3>
+                    <div class="control-group">
+                        <h4>Wire Position</h4>
+                        <div class="button-grid">
+                            <button class="btn btn-small" data-action="move-up">↑ Up</button>
+                            <button class="btn btn-small" data-action="move-down">↓ Down</button>
+                            <button class="btn btn-small" data-action="move-forward">→ Forward</button>
+                            <button class="btn btn-small" data-action="move-backward">← Backward</button>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
+                        <h4>Surface Manipulation</h4>
+                        <p class="help-text">Click and drag control points in the 3D view to adjust the wire shape. Points will snap to tooth surfaces.</p>
+                        <button id="reset-wire-btn" class="btn btn-secondary">Reset Wire</button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3>4. Export</h3>
+                    <button id="export-stl-btn" class="btn btn-success" disabled>
+                        Export STL
+                    </button>
+                </div>
+
+                <!-- Progress Indicator -->
+                <div id="progress-container" class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                    <p id="progress-text">Processing...</p>
+                </div>
+            </div>
+
+            <!-- 3D Viewer -->
+            <div class="viewer-container">
+                <div id="three-container" class="three-container">
+                    <div id="loading-overlay" class="loading-overlay">
+                        <div class="loading-spinner"></div>
+                        <p>Loading 3D model...</p>
+                    </div>
+                </div>
+                
+                <!-- Viewer Controls -->
+                <div class="viewer-controls">
+                    <div class="control-hint">
+                        <strong>Controls:</strong>
+                        Mouse: Rotate | Scroll: Zoom | Right-click: Pan
+                    </div>
+                    <div class="view-buttons">
+                        <button id="reset-view-btn" class="btn btn-small">Reset View</button>
+                        <button id="toggle-wireframe-btn" class="btn btn-small">Wireframe</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>&copy; 2024 Orthodontic Wire Generator | FIXR-Inspired Technology</p>
+        </footer>
+    </div>
+
+    <!-- Notification System -->
+    <div id="notification-container" class="notification-container"></div>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/three-setup.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ui-controller.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
