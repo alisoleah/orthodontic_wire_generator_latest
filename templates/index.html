@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orthodontic Wire Generator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Orthodontic Wire Generator</h1>
+    <div id="container">
+        <div id="viewer"></div>
+        <div id="controls">
+            <button id="upload-btn">Upload STL</button>
+            <input type="file" id="file-input" accept=".stl" style="display: none;">
+            <button id="generate-btn" disabled>Generate Wire</button>
+            <button id="export-gcode-btn" disabled>Export G-code</button>
+            <button id="export-esp32-btn" disabled>Export for ESP32</button>
+            <div id="status"></div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js",
+                "three/examples/jsm/controls/OrbitControls": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/controls/OrbitControls.js"
+            }
+        }
+    </script>
+    <script type="module" src="/static/main.js"></script>
+</body>
+</html>

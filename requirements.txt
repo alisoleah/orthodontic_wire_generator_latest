@@ -21,6 +21,11 @@ Pillow>=8.0.0
 dataclasses-json>=0.5.7  # For better data serialization
 typing-extensions>=4.0.0  # For advanced type hints
 
+# Web Server
+fastapi>=0.78.0
+uvicorn>=0.17.6
+python-multipart>=0.0.5
+
 # Development & Testing (Optional but Recommended)
 pytest>=7.0.0
 pytest-cov>=3.0.0
