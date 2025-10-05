@@ -123,12 +123,12 @@ class WireGenerator:
         if not self._detect_teeth():
             return None
         
-        # Step 3: Position brackets
-        if not self._position_brackets():
+        # Step 3: Identify FA points (FIXR-inspired)
+        if not self._identify_fa_points():
             return None
         
-        # Step 4: Create wire path
-        if not self._create_wire_path():
+        # Step 4: Create surface-projected arch (FIXR-inspired)
+        if not self._create_surface_projected_arch():
             return None
         
         # Step 5: Build wire mesh
@@ -185,53 +185,65 @@ class WireGenerator:
         
         return True
     
-    def _position_brackets(self) -> bool:
-        """Calculate bracket positions."""
-        print("\n--- STEP 3: BRACKET POSITIONING ---")
+    def _identify_fa_points(self) -> bool:
+        """Identify Facial Axis (FA) points - FIXR-inspired approach."""
+        print("\n--- STEP 3: FA POINT IDENTIFICATION (FIXR-INSPIRED) ---")
         
-        self.bracket_positions = self.bracket_positioner.calculate_positions(
-            self.teeth, self.mesh, self.arch_center, self.arch_type
+        # Use the new FA point identification method
+        self.fa_points = self.tooth_detector.identify_fa_points(
+            self.teeth, self.mesh, self.arch_type
         )
         
-        if not self.bracket_positions:
-            print("ERROR: Failed to position brackets")
+        if not self.fa_points:
+            print("ERROR: Failed to identify FA points")
             return False
         
-        visible_count = sum(1 for b in self.bracket_positions if b.get('visible', True))
-        print(f"✓ Positioned {len(self.bracket_positions)} brackets ({visible_count} visible)")
+        print(f"✓ Identified {len(self.fa_points)} FA points for {self.arch_type} arch")
+        
+        # Convert FA points to bracket positions for compatibility with existing code
+        self.bracket_positions = []
+        for fa_point in self.fa_points:
+            bracket_dict = {
+                'position': fa_point.position,
+                'normal': fa_point.normal,
+                'tooth_type': fa_point.tooth_type,
+                'visible': True,
+                'tooth_number': fa_point.tooth_number,
+                'is_upper': fa_point.is_upper,
+                'confidence': fa_point.confidence
+            }
+            self.bracket_positions.append(bracket_dict)
+        
+        print(f"✓ Converted to {len(self.bracket_positions)} bracket positions for compatibility")
         return True
     
-    def _create_wire_path(self) -> bool:
-        """Create the wire path using the path creator."""
-        print("\n--- STEP 4: WIRE PATH CREATION ---")
+    def _create_surface_projected_arch(self) -> bool:
+        """Create surface-projected arch using FIXR-inspired methodology."""
+        print("\n--- STEP 4: SURFACE-PROJECTED ARCH CREATION (FIXR-INSPIRED) ---")
         
-        # Get current height offset from height controller
-        height_offset = self.height_controller.get_height_offset()
+        # Step 4a: Generate surface-projected ideal arch curve
+        print("--- STEP 4a: Generating Surface-Projected Ideal Arch ---")
+        self.ideal_arch_curve = self.wire_path_creator.generate_surface_projected_arch(
+            self.fa_points, self.mesh
+        )
         
-        # Step 4a: Generate the initial ideal arch curve
-        print("--- STEP 4a: Generating Initial Ideal Arch Curve ---")
-        self.ideal_arch_curve = self.wire_path_creator.generate_ideal_arch_curve(self.bracket_positions)
         if self.ideal_arch_curve is None or len(self.ideal_arch_curve) < 2:
-            print("ERROR: Failed to create ideal arch curve")
+            print("ERROR: Failed to create surface-projected arch curve")
             return False
-        print(f"✓ Ideal arch curve created with {len(self.ideal_arch_curve)} points")
+        
+        print(f"✓ Surface-projected arch created with {len(self.ideal_arch_curve)} points")
 
-        # The wire_path will now be the ideal_arch_curve
+        # The wire_path will now be the surface-projected ideal_arch_curve
         self.wire_path = self.ideal_arch_curve
         
-        if self.wire_path is None or len(self.wire_path) < 2:
-            print("ERROR: Failed to create wire path")
-            return False
+        # Step 4b: Create interactive control points for surface manipulation
+        print("--- STEP 4b: Creating Interactive Surface Control Points ---")
+        self.interactive_control_points = self._create_surface_control_points()
         
         # Store control points for visualization (but they'll be hidden)
-        self.wire_control_points = self.wire_path_creator.control_points
+        self.wire_control_points = self.interactive_control_points
         
-        # Step 4b: Create interactive control points for the ideal arch curve
-        print("--- STEP 4b: Creating Interactive Control Points ---")
-        self.interactive_control_points = self._create_interactive_control_points()
-        
-        path_length = self.wire_path_creator.get_path_length()
-        print(f"✓ Wire path created: {len(self.wire_path)} points, {path_length:.1f}mm length")
+        print(f"✓ Interactive surface-projected wire path ready for manipulation")
         return True
     
     def _build_wire_mesh(self) -> bool:
@@ -1137,6 +1149,172 @@ class WireGenerator:
         print("Ready for export and manufacturing.")
         
         return True
+    
+    def _create_surface_control_points(self):
+        """Create interactive control points for surface-constrained manipulation."""
+        try:
+            if self.ideal_arch_curve is None or len(self.ideal_arch_curve) < 2:
+                return []
+            
+            # Create control points at regular intervals along the arch
+            n_control_points = min(7, len(self.ideal_arch_curve) // 10)  # 7 control points max
+            indices = np.linspace(0, len(self.ideal_arch_curve) - 1, n_control_points, dtype=int)
+            
+            control_points = []
+            for i, idx in enumerate(indices):
+                position = self.ideal_arch_curve[idx].copy()
+                
+                # Create control point with surface constraint information
+                control_point = {
+                    'position': position,
+                    'type': 'surface_control',
+                    'index': i,
+                    'original_position': position.copy(),
+                    'arch_index': idx,  # Index in the arch curve
+                    'locked': False,
+                    'surface_constrained': True  # Key flag for FIXR-style interaction
+                }
+                control_points.append(control_point)
+            
+            print(f"✓ Created {len(control_points)} surface control points")
+            return control_points
+            
+        except Exception as e:
+            print(f"ERROR in _create_surface_control_points: {e}")
+            return []
+    
+    def _project_point_to_mesh(self, point: np.ndarray) -> np.ndarray:
+        """
+        Project a 3D point onto the mesh surface using raycasting.
+        
+        This is a core utility for the FIXR-inspired surface-constrained interaction.
+        
+        Args:
+            point: 3D point to project
+        
+        Returns:
+            Projected point on mesh surface
+        """
+        try:
+            import open3d as o3d
+            
+            # Create raycasting scene
+            scene = o3d.t.geometry.RaycastingScene()
+            mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(self.mesh)
+            scene.add_triangles(mesh_t)
+            
+            # Try multiple ray directions to find surface intersection
+            mesh_center = self.mesh.get_center()
+            
+            # Primary ray: towards mesh center
+            ray_direction = mesh_center - point
+            if np.linalg.norm(ray_direction) > 1e-6:
+                ray_direction = ray_direction / np.linalg.norm(ray_direction)
+                
+                rays = o3d.core.Tensor([[point[0], point[1], point[2], 
+                                       ray_direction[0], ray_direction[1], ray_direction[2]]], 
+                                     dtype=o3d.core.Dtype.Float32)
+                
+                result = scene.cast_rays(rays)
+                
+                if result['t_hit'][0] != float('inf'):
+                    hit_distance = result['t_hit'][0].item()  # Convert tensor to float
+                    hit_point = point + ray_direction * hit_distance
+                    return hit_point
+            
+            # Fallback: try opposite direction
+            ray_direction = -ray_direction
+            rays = o3d.core.Tensor([[point[0], point[1], point[2], 
+                                   ray_direction[0], ray_direction[1], ray_direction[2]]], 
+                                 dtype=o3d.core.Dtype.Float32)
+            
+            result = scene.cast_rays(rays)
+            
+            if result['t_hit'][0] != float('inf'):
+                hit_distance = result['t_hit'][0].item()  # Convert tensor to float
+                hit_point = point + ray_direction * hit_distance
+                return hit_point
+            
+            # No intersection found - return original point
+            return point
+            
+        except Exception as e:
+            print(f"Warning: Failed to project point to mesh: {e}")
+            return point
+    
+    def _handle_interactive_update(self, control_point_index: int, new_position: np.ndarray):
+        """
+        Handle interactive update of a control point with surface constraint.
+        
+        This is the core method for FIXR-style interactive manipulation.
+        
+        Args:
+            control_point_index: Index of the control point being moved
+            new_position: New 3D position (will be projected to surface)
+        """
+        try:
+            if not hasattr(self, 'interactive_control_points') or not self.interactive_control_points:
+                return
+            
+            if control_point_index >= len(self.interactive_control_points):
+                return
+            
+            # Project the new position to the mesh surface
+            projected_position = self._project_point_to_mesh(new_position)
+            
+            # Update the control point
+            self.interactive_control_points[control_point_index]['position'] = projected_position
+            
+            # Regenerate the arch curve with the updated control point
+            self._regenerate_arch_from_control_points()
+            
+            # Rebuild the wire mesh
+            self.wire_mesh = self.wire_mesh_builder.build_wire_mesh(self.wire_path)
+            
+            # Update visualization if available
+            if hasattr(self, 'visualizer') and self.visualizer:
+                self.visualizer.update_wire_mesh(self.wire_mesh)
+                self.visualizer.update_control_points(self.interactive_control_points)
+            
+            print(f"✓ Updated control point {control_point_index} with surface constraint")
+            
+        except Exception as e:
+            print(f"ERROR in _handle_interactive_update: {e}")
+    
+    def _regenerate_arch_from_control_points(self):
+        """Regenerate the arch curve from updated control points."""
+        try:
+            if not self.interactive_control_points:
+                return
+            
+            # Extract positions from control points
+            control_positions = [cp['position'] for cp in self.interactive_control_points]
+            
+            # Use the wire path creator to generate a smooth curve through the control points
+            # This maintains the surface-projected nature of the arch
+            from wire.wire_path_creator_enhanced import ControlPoint
+            
+            enhanced_control_points = []
+            for i, pos in enumerate(control_positions):
+                cp = ControlPoint(
+                    position=pos,
+                    type='surface_control',
+                    index=i,
+                    original_position=pos.copy()
+                )
+                enhanced_control_points.append(cp)
+            
+            # Generate new path using the enhanced control points
+            self.wire_path_creator.control_points = enhanced_control_points
+            self.wire_path = self.wire_path_creator.path_generator.generate_path(
+                enhanced_control_points, self.wire_path_creator.base_resolution
+            )
+            
+            # Update the ideal arch curve
+            self.ideal_arch_curve = self.wire_path
+            
+        except Exception as e:
+            print(f"ERROR in _regenerate_arch_from_control_points: {e}")
 
 
 # Example usage function
@@ -1178,5 +1356,3 @@ def example_usage():
 if __name__ == "__main__":
     # Run example
     generator = example_usage()
-
-

@@ -194,3 +194,105 @@ class ToothDetector:
         
         return teeth
 
+
+    def identify_fa_points(self, teeth: List[Dict], mesh, arch_type: str = 'upper'):
+        """
+        Identify Facial Axis (FA) points for each tooth.
+        
+        Args:
+            teeth: List of detected teeth
+            mesh: The dental mesh
+            arch_type: 'upper' or 'lower'
+        
+        Returns:
+            List of FAPoint objects
+        """
+        from core.fa_point import FAPoint
+        import open3d as o3d
+        
+        fa_points = []
+        vertices = np.asarray(mesh.vertices)
+        
+        for i, tooth in enumerate(teeth):
+            try:
+                # Get tooth vertices
+                tooth_vertices = tooth['vertices']
+                if len(tooth_vertices) < 10:
+                    continue
+                
+                # Calculate tooth center
+                tooth_center = np.mean(tooth_vertices, axis=0)
+                
+                # For upper teeth, find the buccal (outer) surface
+                # This is typically the surface facing away from the palate
+                if arch_type == 'upper':
+                    # Find the most buccal (outward-facing) point
+                    # For upper teeth, this is typically the point with maximum Y coordinate
+                    buccal_idx = np.argmax(tooth_vertices[:, 1])  # Assuming Y is buccal-lingual
+                    fa_position = tooth_vertices[buccal_idx]
+                else:
+                    # For lower teeth, find the most buccal point (minimum Y)
+                    buccal_idx = np.argmin(tooth_vertices[:, 1])
+                    fa_position = tooth_vertices[buccal_idx]
+                
+                # Calculate surface normal at FA point
+                # Use nearby vertices to estimate normal
+                distances = np.linalg.norm(tooth_vertices - fa_position, axis=1)
+                nearby_indices = np.argsort(distances)[:10]  # 10 nearest points
+                nearby_vertices = tooth_vertices[nearby_indices]
+                
+                # Estimate normal using PCA
+                centered_vertices = nearby_vertices - np.mean(nearby_vertices, axis=0)
+                _, _, vh = np.linalg.svd(centered_vertices)
+                normal = vh[-1]  # Last component is normal to the surface
+                
+                # Ensure normal points outward (away from tooth center)
+                to_center = tooth_center - fa_position
+                if np.dot(normal, to_center) > 0:
+                    normal = -normal
+                
+                # Determine tooth type based on position
+                tooth_type = self._classify_tooth_type(tooth, i, len(teeth))
+                
+                # Create FA point
+                fa_point = FAPoint(
+                    tooth_number=i + 1,
+                    position=fa_position,
+                    normal=normal,
+                    is_upper=(arch_type == 'upper'),
+                    tooth_type=tooth_type,
+                    confidence=0.8  # Default confidence
+                )
+                
+                fa_points.append(fa_point)
+                
+            except Exception as e:
+                print(f"Warning: Failed to identify FA point for tooth {i}: {e}")
+                continue
+        
+        print(f"✓ Identified {len(fa_points)} FA points for {arch_type} arch")
+        return fa_points
+    
+    def _classify_tooth_type(self, tooth: Dict, index: int, total_teeth: int) -> str:
+        """Classify tooth type based on position in arch."""
+        # Simple classification based on position
+        # This is a simplified approach - in practice, more sophisticated
+        # classification would be used
+        
+        if total_teeth <= 6:
+            # Simplified arch
+            if index <= 1 or index >= total_teeth - 2:
+                return 'canine'
+            else:
+                return 'incisor'
+        else:
+            # Full arch
+            center_teeth = total_teeth // 2
+            if index < 2 or index >= total_teeth - 2:
+                return 'molar'
+            elif index < 4 or index >= total_teeth - 4:
+                return 'premolar'
+            elif index == 2 or index == total_teeth - 3:
+                return 'canine'
+            else:
+                return 'incisor'

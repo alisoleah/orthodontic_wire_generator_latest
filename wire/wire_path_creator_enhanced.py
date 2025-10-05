@@ -856,3 +856,151 @@ class WirePathCreatorEnhanced:
 
         return ideal_curve
 
+
+    def generate_surface_projected_arch(self, fa_points, mesh):
+        """
+        Generate an ideal arch curve projected onto the tooth surfaces.
+        
+        This is the core method for the new FIXR-inspired workflow.
+        
+        Args:
+            fa_points: List of FAPoint objects
+            mesh: The dental mesh for surface projection
+        
+        Returns:
+            Numpy array of 3D points representing the surface-projected arch
+        """
+        if not fa_points or len(fa_points) < 2:
+            print("ERROR: Insufficient FA points for arch generation")
+            return None
+        
+        try:
+            # Step 1: Extract positions from FA points
+            fa_positions = np.array([fp.position for fp in fa_points])
+            
+            # Step 2: Generate initial polynomial arch curve
+            initial_arch = self._generate_polynomial_arch(fa_positions)
+            if initial_arch is None:
+                print("ERROR: Failed to generate initial polynomial arch")
+                return None
+            
+            # Step 3: Project each point onto the mesh surface
+            projected_arch = self._project_curve_to_surface(initial_arch, mesh)
+            if projected_arch is None:
+                print("ERROR: Failed to project arch to surface")
+                return None
+            
+            print(f"✓ Generated surface-projected arch with {len(projected_arch)} points")
+            return projected_arch
+            
+        except Exception as e:
+            print(f"ERROR in generate_surface_projected_arch: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _generate_polynomial_arch(self, fa_positions):
+        """Generate a fourth-order polynomial arch curve through FA points."""
+        try:
+            if len(fa_positions) < 3:
+                # Linear interpolation for few points
+                t = np.linspace(0, 1, 100)
+                if len(fa_positions) == 2:
+                    arch_points = []
+                    for ti in t:
+                        point = fa_positions[0] + ti * (fa_positions[1] - fa_positions[0])
+                        arch_points.append(point)
+                    return np.array(arch_points)
+                else:
+                    return fa_positions
+            
+            # Sort FA points by angle for proper ordering
+            center = np.mean(fa_positions, axis=0)
+            angles = []
+            for pos in fa_positions:
+                dx = pos[0] - center[0]
+                dy = pos[1] - center[1]
+                angle = np.arctan2(dy, dx)
+                angles.append(angle)
+            
+            # Sort by angle
+            sorted_indices = np.argsort(angles)
+            sorted_positions = fa_positions[sorted_indices]
+            
+            # Generate parameter values
+            n_points = len(sorted_positions)
+            t_original = np.linspace(0, 1, n_points)
+            t_smooth = np.linspace(0, 1, 100)
+            
+            # Fit polynomial for each dimension
+            arch_points = []
+            for dim in range(3):
+                # Use polynomial fitting (degree 4 or less based on available points)
+                degree = min(4, n_points - 1)
+                coeffs = np.polyfit(t_original, sorted_positions[:, dim], degree)
+                smooth_values = np.polyval(coeffs, t_smooth)
+                arch_points.append(smooth_values)
+            
+            return np.array(arch_points).T
+            
+        except Exception as e:
+            print(f"ERROR in _generate_polynomial_arch: {e}")
+            return None
+    
+    def _project_curve_to_surface(self, curve_points, mesh):
+        """Project curve points onto the mesh surface using raycasting."""
+        try:
+            import open3d as o3d
+            
+            # Create raycasting scene
+            scene = o3d.t.geometry.RaycastingScene()
+            mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+            scene.add_triangles(mesh_t)
+            
+            projected_points = []
+            mesh_center = mesh.get_center()
+            
+            for point in curve_points:
+                try:
+                    # Cast ray from point towards mesh center
+                    ray_direction = mesh_center - point
+                    ray_direction = ray_direction / np.linalg.norm(ray_direction)
+                    
+                    # Cast ray
+                    rays = o3d.core.Tensor([[point[0], point[1], point[2], 
+                                           ray_direction[0], ray_direction[1], ray_direction[2]]], 
+                                         dtype=o3d.core.Dtype.Float32)
+                    
+                    result = scene.cast_rays(rays)
+                    
+                    if result['t_hit'][0] != float('inf'):
+                        # Hit found - use intersection point
+                        hit_distance = result['t_hit'][0].item()  # Convert tensor to float
+                        hit_point = point + ray_direction * hit_distance
+                        projected_points.append(hit_point)
+                    else:
+                        # No hit - try reverse direction
+                        ray_direction = -ray_direction
+                        rays = o3d.core.Tensor([[point[0], point[1], point[2], 
+                                               ray_direction[0], ray_direction[1], ray_direction[2]]], 
+                                             dtype=o3d.core.Dtype.Float32)
+                        
+                        result = scene.cast_rays(rays)
+                        
+                        if result['t_hit'][0] != float('inf'):
+                            hit_distance = result['t_hit'][0].item()  # Convert tensor to float
+                            hit_point = point + ray_direction * hit_distance
+                            projected_points.append(hit_point)
+                        else:
+                            # No hit in either direction - use original point
+                            projected_points.append(point)
+                
+                except Exception as e:
+                    print(f"Warning: Failed to project point {point}: {e}")
+                    projected_points.append(point)
+            
+            return np.array(projected_points)
+            
+        except Exception as e:
+            print(f"ERROR in _project_curve_to_surface: {e}")
+            return curve_points  # Return original points as fallback
