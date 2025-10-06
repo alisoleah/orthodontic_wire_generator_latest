@@ -27,14 +27,10 @@ class GCodeGenerator:
         }
         
     def generate(self, wire_path: np.ndarray, bends: List[Dict], wire_length: float,
-                height_offset: float, arch_type: str, wire_size: str,
-                filename: Optional[str] = None) -> str:
-        """Generate complete G-code for wire bending."""
-        
-        if filename is None:
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"wire_gcode_{arch_type}_{timestamp}.gcode"
-        
+                height_offset: float, arch_type: str, wire_size: str) -> str:
+        """
+        Generate complete G-code for wire bending and return it as a string.
+        """
         # Generate G-code content
         gcode_lines = self._generate_header(wire_size, arch_type, wire_length, 
                                           height_offset, len(bends))
@@ -43,16 +39,7 @@ class GCodeGenerator:
         gcode_lines.extend(self._generate_bending_operations(bends))
         gcode_lines.extend(self._generate_completion(wire_length, bends))
         
-        # Write to file
-        gcode_content = '\n'.join(gcode_lines)
-        try:
-            with open(filename, 'w') as f:
-                f.write(gcode_content)
-            print(f"G-code generated: {filename}")
-            return filename
-        except Exception as e:
-            print(f"G-code generation failed: {e}")
-            return None
+        return '\n'.join(gcode_lines)
     
     def _generate_header(self, wire_size: str, arch_type: str, wire_length: float,
                         height_offset: float, bend_count: int) -> List[str]:

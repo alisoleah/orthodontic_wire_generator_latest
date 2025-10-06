@@ -455,16 +455,41 @@ class WorkflowManager:
     # EXPORT FUNCTIONS
     # ============================================
     
-    def export_gcode(self, file_path: str, arch_type: str = None):
-        """Export wire as G-code"""
+    def export_gcode(self, wire_size: float, arch_type: str = None) -> Optional[str]:
+        """Generate G-code for the wire and return it as a string."""
         if arch_type is None:
             arch_type = self.active_arch
         
         arch_data = self.get_arch_data(arch_type)
         if arch_data is None or arch_data['wire_path'] is None:
             raise ValueError(f"No wire path to export for {arch_type} arch")
+
+        # Mock bend data and calculate wire length for now
+        # TODO: Implement proper bend calculation
+        wire_path = arch_data['wire_path']
+        wire_length = np.sum(np.linalg.norm(np.diff(wire_path, axis=0), axis=1))
+
+        # Mock bend data
+        bends = []
+        for i in range(1, len(wire_path) - 1):
+            bends.append({
+                'position': wire_path[i],
+                'angle': 90.0,  # Mock angle
+                'radius': 1.0,  # Mock radius
+                'direction': 'CW',
+                'wire_length': np.sum(np.linalg.norm(np.diff(wire_path[:i+1], axis=0), axis=1))
+            })
+
+        gcode_content = self.gcode_generator.generate(
+            wire_path=wire_path,
+            bends=bends,
+            wire_length=wire_length,
+            height_offset=self.global_height_offset,
+            arch_type=arch_type,
+            wire_size=f"{wire_size}mm"
+        )
         
-        self.gcode_generator.generate_gcode(arch_data['wire_path'], file_path)
+        return gcode_content
     
     def export_esp32(self, file_path: str, arch_type: str = None):
         """Export wire as ESP32 Arduino code"""

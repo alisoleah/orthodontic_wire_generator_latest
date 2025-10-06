@@ -100,10 +100,12 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         self.camera_rotation = [0, 0]
         self.camera_distance = 100
         self.camera_center = [0, 0, 0]
+        self.camera_pan = [0.0, 0.0, 0.0]
         
         # Mouse interaction
         self.last_mouse_pos = QPoint()
         self.dragging_point_index = -1
+        self.jaw_rotation_angle = 0
         
         # Colors
         self.colors = {
@@ -242,6 +244,12 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         """Update wire display"""
         if OPENGL_AVAILABLE:
             self.update()
+
+    def set_jaw_rotation(self, angle: int):
+        """Set the rotation angle for the lower jaw."""
+        self.jaw_rotation_angle = angle
+        if OPENGL_AVAILABLE:
+            self.update()
     
     # ============================================
     # OPENGL RENDERING (if available)
@@ -298,10 +306,30 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                 if self.show_both or self.active_arch == 'upper':
                     self.draw_mesh(self.upper_arch_mesh, self.colors['upper_arch'])
             
-            # Draw lower arch
+            # Draw lower arch with an offset and rotation for simulation
             if self.lower_arch_mesh is not None:
                 if self.show_both or self.active_arch == 'lower':
+                    glPushMatrix()
+
+                    # Apply a downward translation to separate the lower arch from the upper
+                    translate_y = -self.lower_arch_mesh.bounds[1][1] * 0.2 if self.show_both else 0
+                    glTranslatef(0, translate_y, 0)
+
+                    # Apply hinge rotation for jaw simulation
+                    if self.jaw_rotation_angle > 0:
+                        # Calculate an approximate hinge point at the back of the jaw
+                        bounds = self.lower_arch_mesh.bounds
+                        center_x = (bounds[0][0] + bounds[1][0]) / 2
+                        center_z = (bounds[0][2] + bounds[1][2]) / 2
+                        hinge_y = bounds[0][1]  # Y-min, assuming this is the back
+
+                        # Translate to hinge, rotate, and translate back
+                        glTranslatef(center_x, hinge_y, center_z)
+                        glRotatef(self.jaw_rotation_angle, 1, 0, 0)  # Rotate around X-axis
+                        glTranslatef(-center_x, -hinge_y, -center_z)
+
                     self.draw_mesh(self.lower_arch_mesh, self.colors['lower_arch'])
+                    glPopMatrix()
             
             # Draw opposing arch (if loaded, semi-transparent)
             if self.opposing_arch_mesh is not None:
@@ -349,7 +377,7 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         
         def setup_camera(self):
             """Setup camera position and orientation"""
-            glTranslatef(0, 0, -self.camera_distance)
+            glTranslatef(self.camera_pan[0], self.camera_pan[1], -self.camera_distance)
             glRotatef(self.camera_rotation[0], 1, 0, 0)
             glRotatef(self.camera_rotation[1], 0, 1, 0)
             glTranslatef(-self.camera_center[0], -self.camera_center[1], -self.camera_center[2])
@@ -559,7 +587,10 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         elif event.button() == Qt.RightButton:
             # Right click for camera rotation
             self.last_mouse_pos = event.pos()
-    
+        elif event.button() == Qt.MiddleButton:
+            # Middle click for camera panning
+            self.last_mouse_pos = event.pos()
+
     def mouseMoveEvent(self, event: QMouseEvent):
         """Handle mouse movement"""
         if event.buttons() & Qt.RightButton:
@@ -575,6 +606,22 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
             if OPENGL_AVAILABLE:
                 self.update()
         
+        elif event.buttons() & Qt.MiddleButton:
+            # Camera panning
+            dx = event.x() - self.last_mouse_pos.x()
+            dy = event.y() - self.last_mouse_pos.y()
+
+            # Adjust pan speed based on zoom level for more intuitive control
+            pan_speed = 0.1 * (self.camera_distance / 100.0)
+
+            self.camera_pan[0] += dx * pan_speed
+            self.camera_pan[1] -= dy * pan_speed  # Y is inverted in screen coordinates
+
+            self.last_mouse_pos = event.pos()
+
+            if OPENGL_AVAILABLE:
+                self.update()
+
         elif event.buttons() & Qt.LeftButton and self.dragging_point_index >= 0:
             # Drag control point
             new_position = self.screen_to_world(event.pos())

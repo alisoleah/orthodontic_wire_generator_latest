@@ -45,6 +45,8 @@ class EnhancedControlPanel(QWidget):
     wire_generated = pyqtSignal()
     interaction_mode_requested = pyqtSignal(str)  # mode (DEFINE_PLANE, PLACE_POINTS, etc.)
     control_points_converted = pyqtSignal(list) # list of control points
+    gcode_exported = pyqtSignal(str) # The generated G-code content
+    jaw_rotation_changed = pyqtSignal(int) # The new rotation angle
     
     def __init__(self, workflow_manager: WorkflowManager, parent=None):
         super().__init__(parent)
@@ -263,6 +265,29 @@ class EnhancedControlPanel(QWidget):
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
         
+        # ============================================
+        # SECTION 8: JAW SIMULATION
+        # ============================================
+        simulation_group = QGroupBox("8. Jaw Simulation")
+        simulation_layout = QFormLayout()
+
+        self.jaw_rotation_slider = QSlider(Qt.Horizontal)
+        self.jaw_rotation_slider.setMinimum(0)
+        self.jaw_rotation_slider.setMaximum(45) # 0 to 45 degrees rotation
+        self.jaw_rotation_slider.setValue(0)
+        self.jaw_rotation_slider.setTickPosition(QSlider.TicksBelow)
+        self.jaw_rotation_slider.setTickInterval(5)
+        self.jaw_rotation_slider.valueChanged.connect(self.on_jaw_rotation_changed)
+
+        self.jaw_rotation_label = QLabel("0°")
+        rotation_layout = QHBoxLayout()
+        rotation_layout.addWidget(self.jaw_rotation_slider)
+        rotation_layout.addWidget(self.jaw_rotation_label)
+
+        simulation_layout.addRow("Lower Jaw Opening:", rotation_layout)
+        simulation_group.setLayout(simulation_layout)
+        layout.addWidget(simulation_group)
+
         # Add stretch to push everything to top
         layout.addStretch()
         
@@ -358,6 +383,11 @@ class EnhancedControlPanel(QWidget):
         self.smoothness_label.setText(f"{value} points")
         # This would be used in wire generation
     
+    def on_jaw_rotation_changed(self, value):
+        """Handle jaw rotation slider change."""
+        self.jaw_rotation_label.setText(f"{value}°")
+        self.jaw_rotation_changed.emit(value)
+
     def update_workflow_steps(self):
         """Update workflow steps based on selected mode"""
         # Clear existing steps
@@ -654,16 +684,31 @@ class EnhancedControlPanel(QWidget):
             QMessageBox.critical(self, "Error", f"Collision detection failed:\n{str(e)}")
     
     def export_gcode(self):
-        """Export G-code"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save G-Code", "", "G-Code Files (*.gcode)"
-        )
-        if file_path:
-            try:
-                self.workflow_manager.export_gcode(file_path)
-                QMessageBox.information(self, "Success", "G-Code exported successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+        """Generate G-code and display it in the GUI, with an option to save."""
+        try:
+            wire_diameter = self.wire_diameter.value()
+            gcode_content = self.workflow_manager.export_gcode(wire_size=wire_diameter)
+
+            if gcode_content:
+                self.gcode_exported.emit(gcode_content)
+                QMessageBox.information(self, "G-Code Generated", "G-Code is now displayed in the Exported Code Viewer.")
+
+                reply = QMessageBox.question(self, 'Save G-Code', 'Do you want to save the G-Code to a file?',
+                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+
+                if reply == QMessageBox.Yes:
+                    file_path, _ = QFileDialog.getSaveFileName(
+                        self, "Save G-Code", "", "G-Code Files (*.gcode)"
+                    )
+                    if file_path:
+                        with open(file_path, 'w') as f:
+                            f.write(gcode_content)
+                        QMessageBox.information(self, "Success", f"G-Code saved to {file_path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", "Could not generate G-Code. Ensure a wire path exists.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
     
     def export_esp32(self):
         """Export ESP32 code"""

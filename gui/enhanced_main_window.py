@@ -226,6 +226,8 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.control_panel.wire_generated.connect(self.on_wire_generated)
         self.control_panel.interaction_mode_requested.connect(self.on_interaction_mode_requested)
         self.control_panel.control_points_converted.connect(self.on_control_points_converted)
+        self.control_panel.gcode_exported.connect(self.on_gcode_exported)
+        self.control_panel.jaw_rotation_changed.connect(self.on_jaw_rotation_changed)
         
         # Visualizer signals
         self.visualizer.point_added.connect(self.on_point_added)
@@ -345,10 +347,27 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.update_status(f"Switched to {mode} mode")
     
     def on_active_arch_changed(self, arch_type: str):
-        """Handle active arch change"""
+        """Handle active arch change and synchronize the visualizer's state."""
         self.visualizer.set_active_arch(arch_type)
         self.status_panel.update_active_arch(arch_type)
         self.update_status(f"Active arch: {arch_type}")
+
+        # Synchronize the visualizer with the data from the new active arch
+        arch_data = self.workflow_manager.get_arch_data(arch_type)
+        if arch_data:
+            # If data exists for this arch, load it into the visualizer
+            self.visualizer.control_points = arch_data.get('control_points', [])
+            self.visualizer.wire_path = arch_data.get('wire_path', None)
+            self.visualizer.detected_teeth = arch_data.get('teeth_detected', [])
+            self.visualizer.bracket_positions = arch_data.get('bracket_positions', [])
+        else:
+            # If no data exists (e.g., arch not loaded yet), clear the visualizer
+            self.visualizer.control_points = []
+            self.visualizer.wire_path = None
+            self.visualizer.detected_teeth = []
+            self.visualizer.bracket_positions = []
+
+        self.visualizer.update()
     
     def on_show_both_changed(self, show_both: bool):
         """Handle show both arches toggle"""
@@ -404,12 +423,17 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
             self.update_status(f"Error adding point: {str(e)}")
     
     def on_point_moved(self, index: int, new_position):
-        """Handle point movement in visualizer"""
+        """Handle point movement in visualizer and regenerate the wire."""
         try:
             self.workflow_manager.update_control_point(index, new_position)
             self.update_status(f"Control point {index + 1} moved")
+
+            # Regenerate the wire to reflect the change in real-time
+            self.workflow_manager.generate_wire_from_control_points()
+            self.on_wire_generated()
+
         except Exception as e:
-            self.update_status(f"Error moving point: {str(e)}")
+            self.update_status(f"Error updating wire: {str(e)}")
     
     def on_interaction_mode_changed(self, mode: str):
         """Handle interaction mode change"""
@@ -434,6 +458,16 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         if self.visualizer:
             self.visualizer.display_editable_control_points(control_points)
         self.update_status(f"Converted to {len(control_points)} manual control points. Ready for editing.")
+
+    def on_gcode_exported(self, gcode_content: str):
+        """Display the generated G-code in the status panel's code viewer."""
+        if self.status_panel:
+            self.status_panel.display_exported_code(gcode_content)
+
+    def on_jaw_rotation_changed(self, angle: int):
+        """Handle the jaw rotation slider change and update the visualizer."""
+        if self.visualizer:
+            self.visualizer.set_jaw_rotation(angle)
 
     # ============================================
     # MENU ACTIONS
@@ -635,7 +669,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
 
 
 class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
-    """Enhanced status panel with comprehensive information display"""
+    """Enhanced status panel with comprehensive information display and code viewer."""
     
     def __init__(self, parent=None):
         if PYQT5_AVAILABLE:
@@ -644,6 +678,7 @@ class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
     
     def init_ui(self):
         """Initialize status panel UI"""
+        from PyQt5.QtWidgets import QTextEdit, QGroupBox, QFrame
         layout = QVBoxLayout()
         
         # Title
@@ -687,6 +722,17 @@ class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
         wire_group.setLayout(wire_layout)
         layout.addWidget(wire_group)
         
+        # Exported Code Viewer
+        export_group = QGroupBox("Exported Code Viewer")
+        export_layout = QVBoxLayout()
+        self.code_viewer = QTextEdit()
+        self.code_viewer.setReadOnly(True)
+        self.code_viewer.setFontFamily("Courier")
+        self.code_viewer.setLineWrapMode(QTextEdit.NoWrap)
+        export_layout.addWidget(self.code_viewer)
+        export_group.setLayout(export_layout)
+        layout.addWidget(export_group)
+
         # Add stretch to push content to top
         layout.addStretch()
         
@@ -746,6 +792,13 @@ class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
             self.control_points_status.setText("Control Points: 0")
             self.height_offset_status.setText("Height Offset: 0.0 mm")
             self.arches_loaded_status.setText("Arches Loaded: 0/2")
+            if hasattr(self, 'code_viewer'):
+                self.code_viewer.clear()
+
+    def display_exported_code(self, code: str):
+        """Display the given code in the code viewer text edit."""
+        if PYQT5_AVAILABLE and hasattr(self, 'code_viewer'):
+            self.code_viewer.setText(code)
 
 
 # Main application entry point
