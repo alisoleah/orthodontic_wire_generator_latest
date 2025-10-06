@@ -312,22 +312,16 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                     glPushMatrix()
 
                     # Apply a downward translation to separate the lower arch from the upper
-                    if self.show_both:
-                        bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
-                        translate_y = -bbox.max_bound[1] * 0.2
-                    else:
-                        translate_y = 0
+                    translate_y = -self.lower_arch_mesh.bounds[1][1] * 0.2 if self.show_both else 0
                     glTranslatef(0, translate_y, 0)
 
                     # Apply hinge rotation for jaw simulation
-                    if hasattr(self, 'jaw_rotation_angle') and self.jaw_rotation_angle > 0:
+                    if self.jaw_rotation_angle > 0:
                         # Calculate an approximate hinge point at the back of the jaw
-                        bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
-                        min_bound = bbox.min_bound
-                        max_bound = bbox.max_bound
-                        center_x = (min_bound[0] + max_bound[0]) / 2
-                        center_z = (min_bound[2] + max_bound[2]) / 2
-                        hinge_y = min_bound[1]  # Y-min, assuming this is the back
+                        bounds = self.lower_arch_mesh.bounds
+                        center_x = (bounds[0][0] + bounds[1][0]) / 2
+                        center_z = (bounds[0][2] + bounds[1][2]) / 2
+                        hinge_y = bounds[0][1]  # Y-min, assuming this is the back
 
                         # Translate to hinge, rotate, and translate back
                         glTranslatef(center_x, hinge_y, center_z)
@@ -342,12 +336,12 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                 self.draw_mesh(self.opposing_arch_mesh, self.colors['opposing_arch'])
             
             # Draw detected teeth
-            if self.show_teeth and self.detected_teeth and len(self.detected_teeth) > 0:
+            if self.show_teeth and len(self.detected_teeth) > 0:
                 for tooth in self.detected_teeth:
                     self.draw_tooth_outline(tooth, self.colors['teeth'])
 
             # Draw bracket positions
-            if self.show_brackets and self.bracket_positions and len(self.bracket_positions) > 0:
+            if self.show_brackets and len(self.bracket_positions) > 0:
                 for i, bracket_data in enumerate(self.bracket_positions):
                     # Extract position from bracket dictionary
                     if isinstance(bracket_data, dict):
@@ -361,27 +355,25 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                     self.draw_text_3d(bracket_pos, f"B{i+1}")
             
             # Draw occlusal plane
-            if self.occlusal_plane_points and len(self.occlusal_plane_points) > 0:
+            if len(self.occlusal_plane_points) > 0:
                 self.draw_occlusal_plane()
 
             # Draw control points
-            if self.control_points:
-                for i, point in enumerate(self.control_points):
-                    color = self.colors['control_points']
-                    if self.interaction_mode == 'DRAG_POINTS' and i == self.dragging_point_index:
-                        color = (1, 1, 0, 1)  # Highlight dragged point
+            for i, point in enumerate(self.control_points):
+                color = self.colors['control_points']
+                if self.interaction_mode == 'DRAG_POINTS' and i == self.dragging_point_index:
+                    color = (1, 1, 0, 1)  # Highlight dragged point
 
-                    self.draw_sphere(point, radius=1.0, color=color)
-                    self.draw_text_3d(point, f"P{i+1}")
+                self.draw_sphere(point, radius=1.0, color=color)
+                self.draw_text_3d(point, f"P{i+1}")
 
             # Draw wire path
-            if self.wire_path is not None and len(self.wire_path) > 0:
+            if self.wire_path is not None:
                 self.draw_wire_path(self.wire_path)
 
             # Draw collision points
-            if self.collision_points:
-                for point in self.collision_points:
-                    self.draw_sphere(point, radius=0.5, color=self.colors['collision_points'])
+            for point in self.collision_points:
+                self.draw_sphere(point, radius=0.5, color=self.colors['collision_points'])
         
         def setup_camera(self):
             """Setup camera position and orientation"""
@@ -724,43 +716,21 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
             ray_direction = np.array(far_plane) - ray_origin
             ray_direction = ray_direction / np.linalg.norm(ray_direction)
 
-            # Open3D doesn't have built-in ray-mesh intersection
-            # Use a simpler approach: cast ray and find closest point on mesh along the ray
+            # Use trimesh for ray-mesh intersection
+            intersector = active_mesh.ray
+            locations, index_ray, index_tri = intersector.intersects_location(
+                ray_origins=[ray_origin],
+                ray_directions=[ray_direction]
+            )
 
-            # Sample points along the ray
-            max_distance = 1000.0
-            num_samples = 100
-            ray_points = []
-            for t in np.linspace(0, max_distance, num_samples):
-                point = ray_origin + ray_direction * t
-                ray_points.append(point)
-
-            ray_points = np.array(ray_points)
-
-            # Get mesh vertices
-            mesh_vertices = np.asarray(active_mesh.vertices)
-
-            # Find closest mesh vertex to any ray point
-            from scipy.spatial import KDTree
-            tree = KDTree(mesh_vertices)
-
-            min_distance = float('inf')
-            closest_point = None
-
-            for ray_point in ray_points:
-                dist, idx = tree.query(ray_point)
-                if dist < min_distance:
-                    min_distance = dist
-                    closest_point = mesh_vertices[idx]
-
-            # Only return if we found a reasonably close point (within 10mm)
-            if min_distance < 10.0:
-                return closest_point
+            if len(locations) > 0:
+                # Return the first intersection point
+                return locations[0]
             else:
                 return None
 
         except Exception as e:
-            print(f"Error in screen_to_world: {e}")
+            print(f"Error in screen_to_world (ray-casting): {e}")
             return None
 
 
