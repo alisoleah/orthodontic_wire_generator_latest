@@ -13,14 +13,25 @@ from enum import Enum
 import numpy as np
 from typing import Optional, Dict, List, Tuple, Any
 
-from .mesh_processor import MeshProcessor
-from .tooth_detector import ToothDetector
-from .bracket_positioner import BracketPositioner
-from ..wire.wire_path_creator import WirePathCreator
-from ..wire.wire_path_creator_enhanced import WirePathCreatorEnhanced
-from ..export.gcode_generator import GCodeGenerator
-from ..export.esp32_generator import ESP32Generator
-from ..export.stl_exporter import STLExporter
+try:
+    from .mesh_processor import MeshProcessor
+    from .tooth_detector import ToothDetector
+    from .bracket_positioner import BracketPositioner
+    from ..wire.wire_path_creator import WirePathCreator
+    from ..wire.wire_path_creator_enhanced import WirePathCreatorEnhanced
+    from ..export.gcode_generator import GCodeGenerator
+    from ..export.esp32_generator import ESP32Generator
+    from ..export.stl_exporter import STLExporter
+except ImportError:
+    # Fallback to absolute imports when run as top-level script
+    from core.mesh_processor import MeshProcessor
+    from core.tooth_detector import ToothDetector
+    from core.bracket_positioner import BracketPositioner
+    from wire.wire_path_creator import WirePathCreator
+    from wire.wire_path_creator_enhanced import WirePathCreatorEnhanced
+    from export.gcode_generator import GCodeGenerator
+    from export.esp32_generator import ESP32Generator
+    from export.stl_exporter import STLExporter
 
 
 class WorkflowMode(Enum):
@@ -89,8 +100,16 @@ class WorkflowManager:
             Dictionary containing mesh data and metadata
         """
         try:
+            # Load the mesh
             mesh_data = self.mesh_processor.load_mesh(stl_path)
-            
+
+            if mesh_data is None:
+                print(f"Error: Failed to load mesh from {stl_path}")
+                return None
+
+            # Clean the mesh
+            mesh_data = self.mesh_processor.clean_mesh(mesh_data)
+
             arch_data = {
                 'mesh': mesh_data,
                 'stl_path': stl_path,
@@ -100,41 +119,55 @@ class WorkflowManager:
                 'bracket_positions': None,
                 'last_modified': None
             }
-            
+
             if arch_type == 'upper':
                 self.upper_arch_data = arch_data
             else:
                 self.lower_arch_data = arch_data
-            
+
+            print(f"Successfully loaded {arch_type} arch: {len(mesh_data.vertices)} vertices")
             return mesh_data
-            
+
         except Exception as e:
             print(f"Error loading arch {arch_type}: {str(e)}")
-            raise
+            import traceback
+            traceback.print_exc()
+            return None
     
     def load_opposing_arch(self, stl_path: str) -> Dict[str, Any]:
         """
         Load opposing arch for collision detection
-        
+
         Args:
             stl_path: Path to opposing arch STL file
-            
+
         Returns:
             Dictionary containing opposing arch mesh data
         """
         try:
+            # Load the mesh
             mesh_data = self.mesh_processor.load_mesh(stl_path)
-            
+
+            if mesh_data is None:
+                print(f"Error: Failed to load opposing arch from {stl_path}")
+                return None
+
+            # Clean the mesh
+            mesh_data = self.mesh_processor.clean_mesh(mesh_data)
+
             self.opposing_arch_data = {
                 'mesh': mesh_data,
                 'stl_path': stl_path
             }
-            
+
+            print(f"Successfully loaded opposing arch: {len(mesh_data.vertices)} vertices")
             return mesh_data
-            
+
         except Exception as e:
             print(f"Error loading opposing arch: {str(e)}")
-            raise
+            import traceback
+            traceback.print_exc()
+            return None
     
     def get_arch_data(self, arch_type: str) -> Optional[Dict[str, Any]]:
         """Get arch data for specified arch type"""
@@ -182,18 +215,27 @@ class WorkflowManager:
         arch_data = self.get_arch_data(arch_type)
         if arch_data is None:
             raise ValueError(f"No {arch_type} arch loaded")
-        
+
         # Step 1: Detect teeth
-        detected_teeth = self.tooth_detector.detect_teeth(arch_data['mesh'])
+        detected_teeth = self.tooth_detector.detect_teeth(arch_data['mesh'], arch_type)
         arch_data['teeth_detected'] = detected_teeth
-        
+
+        # Get arch center for bracket positioning
+        arch_center = arch_data['mesh'].get_center()
+
         # Step 2: Position brackets
-        bracket_positions = self.bracket_positioner.calculate_positions(detected_teeth)
+        bracket_positions = self.bracket_positioner.calculate_positions(
+            detected_teeth,
+            arch_data['mesh'],
+            arch_center,
+            arch_type
+        )
         arch_data['bracket_positions'] = bracket_positions
         
         # Step 3: Generate wire path
         wire_path = self.wire_path_creator_enhanced.create_smooth_path(
-            bracket_positions, 
+            bracket_positions,
+            arch_center,
             height_offset=self.global_height_offset
         )
         arch_data['wire_path'] = wire_path

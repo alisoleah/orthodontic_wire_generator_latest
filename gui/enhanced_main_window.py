@@ -10,6 +10,7 @@ This module provides the main application window that integrates:
 
 import sys
 import os
+import numpy as np
 from typing import Optional, Dict, Any
 
 # Add the parent directory to the path to import modules
@@ -97,7 +98,8 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         splitter.addWidget(self.status_panel)
         
         # Set splitter proportions
-        splitter.setSizes([350, 900, 350])\n        
+        splitter.setSizes([350, 900, 350])
+
         # Create menu bar
         self.create_menu_bar()
         
@@ -222,6 +224,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.control_panel.active_arch_changed.connect(self.on_active_arch_changed)
         self.control_panel.show_both_changed.connect(self.on_show_both_changed)
         self.control_panel.wire_generated.connect(self.on_wire_generated)
+        self.control_panel.interaction_mode_requested.connect(self.on_interaction_mode_requested)
         
         # Visualizer signals
         self.visualizer.point_added.connect(self.on_point_added)
@@ -393,7 +396,12 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         
         description = mode_descriptions.get(mode, f"Mode: {mode}")
         self.update_status(description)
-    
+
+    def on_interaction_mode_requested(self, mode: str):
+        """Handle request to change interaction mode from control panel"""
+        self.visualizer.set_interaction_mode(mode)
+        self.update_status(f"Switched to {mode} mode")
+
     # ============================================
     # MENU ACTIONS
     # ============================================

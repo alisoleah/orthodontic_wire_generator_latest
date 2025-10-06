@@ -21,16 +21,20 @@ class MeshProcessor:
             mesh = o3d.io.read_triangle_mesh(stl_path)
             if not mesh.has_triangles():
                 raise ValueError("No triangles found in mesh")
-            
+
             if self.verbose:
                 print(f"Loaded STL: {len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles")
-            
+
             return mesh
-            
+
         except Exception as e:
             if self.verbose:
                 print(f"Error loading STL: {e}")
             return None
+
+    def load_mesh(self, stl_path: str) -> Optional[o3d.geometry.TriangleMesh]:
+        """Alias for load_stl() for compatibility."""
+        return self.load_stl(stl_path)
     
     def clean_mesh(self, mesh: o3d.geometry.TriangleMesh) -> o3d.geometry.TriangleMesh:
         """Clean and prepare mesh for processing."""

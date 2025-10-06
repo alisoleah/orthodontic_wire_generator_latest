@@ -23,6 +23,14 @@ class ToothDetector:
         
     def detect_teeth(self, mesh, arch_type: str) -> List[Dict]:
         """Detect teeth from mesh using angular segmentation."""
+        if mesh is None:
+            print("Error: Mesh is None, cannot detect teeth")
+            return []
+
+        if not hasattr(mesh, 'vertices') or len(mesh.vertices) == 0:
+            print("Error: Mesh has no vertices")
+            return []
+
         vertices = np.asarray(mesh.vertices)
         bbox = mesh.get_axis_aligned_bounding_box()
         center = mesh.get_center()

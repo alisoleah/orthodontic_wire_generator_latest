@@ -37,47 +37,47 @@ sys.path.insert(0, str(current_dir))
 def check_dependencies():
     """Check if all required dependencies are available"""
     missing_deps = []
-    
+
     # Check PyQt5
     try:
         import PyQt5
-        print("✓ PyQt5 available")
+        print("[OK] PyQt5 available")
     except ImportError:
         missing_deps.append("PyQt5")
-        print("✗ PyQt5 not available")
-    
+        print("[X] PyQt5 not available")
+
     # Check PyOpenGL
     try:
         import OpenGL
-        print("✓ PyOpenGL available")
+        print("[OK] PyOpenGL available")
     except ImportError:
         missing_deps.append("PyOpenGL")
-        print("✗ PyOpenGL not available")
-    
+        print("[X] PyOpenGL not available")
+
     # Check numpy
     try:
         import numpy
-        print("✓ NumPy available")
+        print("[OK] NumPy available")
     except ImportError:
         missing_deps.append("numpy")
-        print("✗ NumPy not available")
-    
+        print("[X] NumPy not available")
+
     # Check scipy
     try:
         import scipy
-        print("✓ SciPy available")
+        print("[OK] SciPy available")
     except ImportError:
         missing_deps.append("scipy")
-        print("✗ SciPy not available")
-    
+        print("[X] SciPy not available")
+
     # Check trimesh
     try:
         import trimesh
-        print("✓ Trimesh available")
+        print("[OK] Trimesh available")
     except ImportError:
         missing_deps.append("trimesh")
-        print("✗ Trimesh not available")
-    
+        print("[X] Trimesh not available")
+
     return missing_deps
 
 def install_dependencies(missing_deps):
@@ -99,9 +99,9 @@ def install_dependencies(missing_deps):
             ], capture_output=True, text=True)
             
             if result.returncode == 0:
-                print(f"✓ {dep} installed successfully")
+                print(f"[OK] {dep} installed successfully")
             else:
-                print(f"✗ Failed to install {dep}: {result.stderr}")
+                print(f"[X] Failed to install {dep}: {result.stderr}")
                 return False
         
         return True
@@ -230,16 +230,16 @@ def main():
                 print(f"\nMissing dependencies: {', '.join(missing_deps)}")
                 print("Run with --install-deps to install them.")
             else:
-                print("\n✓ All dependencies are available!")
+                print("\n[OK] All dependencies are available!")
             return
-        
+
         elif arg == '--install-deps':
             print("Checking and installing dependencies...")
             missing_deps = check_dependencies()
             if install_dependencies(missing_deps):
-                print("\n✓ All dependencies installed successfully!")
+                print("\n[OK] All dependencies installed successfully!")
             else:
-                print("\n✗ Failed to install some dependencies.")
+                print("\n[X] Failed to install some dependencies.")
             return
         
         elif arg == '--fallback':

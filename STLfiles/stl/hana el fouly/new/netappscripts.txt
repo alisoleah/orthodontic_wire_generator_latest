@@ -1,0 +1,498 @@
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> current script 
+#!/usr/bin/env python3 
+import os, sys, time, math, signal, requests
+from requests.auth import HTTPBasicAuth
+#from prometheus_client import start_http_server, Gauge, CollectorRegistry, PROCESS_COLLECTOR, PLATFORM_COLLECTOR
+from prometheus_client import start_http_server, Gauge, CollectorRegistry, ProcessCollector, PlatformCollector
+
+registry = CollectorRegistry()
+ProcessCollector(registry=registry)
+PlatformCollector(registry=registry)
+
+# ========= Config (env) =========
+ONTAP_HOST   = os.getenv("NETAPP_HOST")
+ONTAP_USER   = os.getenv("NETAPP_USER")
+ONTAP_PASS   = os.getenv("NETAPP_PASS")
+ONTAP_VERIFY = os.getenv("ONTAP_VERIFY", "false").lower() in ("1","true","yes")
+ONTAP_CA_BUNDLE = os.getenv("ONTAP_CA_BUNDLE")  # optional file path
+SCRAPE_EVERY = int(os.getenv("SCRAPE_EVERY", "15"))
+LISTEN_PORT  = int(os.getenv("LISTEN_PORT", "9000"))
+HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "10"))
+# Comma-separated UUID list; if set, only these volumes are scraped
+FILTER_VOLUME_UUIDS = [u.strip() for u in os.getenv("FILTER_VOLUME_UUIDS","").split(",") if u.strip()]
+
+BASE = f"https://{ONTAP_HOST}/api"
+AUTH = HTTPBasicAuth(ONTAP_USER, ONTAP_PASS)
+
+SESS = requests.Session()
+if ONTAP_CA_BUNDLE:
+    SESS.verify = ONTAP_CA_BUNDLE
+else:
+    SESS.verify = ONTAP_VERIFY
+
+# ========= Metrics =========
+
+labels_vol = ["cluster","svm","volume","uuid","state","style","tiering_policy"]
+labels_aggr = ["cluster","aggregate","uuid","node","state","ha_policy"]
+
+vol_size_bytes      = Gauge("ontap_volume_size_bytes","Provisioned volume size (bytes)", labels_vol, registry=registry)
+vol_used_bytes      = Gauge("ontap_volume_used_bytes","Logical used bytes", labels_vol, registry=registry)
+vol_used_percent    = Gauge("ontap_volume_used_percent","Used %", labels_vol, registry=registry)
+vol_inode_used_pct  = Gauge("ontap_volume_inodes_used_percent","Inodes used %", labels_vol, registry=registry)
+vol_is_online       = Gauge("ontap_volume_online","Volume online (1/0)", labels_vol, registry=registry)
+vol_is_encrypted    = Gauge("ontap_volume_encrypted","Volume is NVE/NSE encrypted (1/0)", labels_vol, registry=registry)
+vol_snapshot_used_b = Gauge("ontap_volume_snapshot_used_bytes","Snapshot used (bytes)", labels_vol, registry=registry)
+
+aggr_size_bytes     = Gauge("ontap_aggregate_size_bytes","Aggregate size (bytes)", labels_aggr, registry=registry)
+aggr_used_bytes     = Gauge("ontap_aggregate_used_bytes","Aggregate used (bytes)", labels_aggr, registry=registry)
+aggr_used_percent   = Gauge("ontap_aggregate_used_percent","Aggregate used %", labels_aggr, registry=registry)
+aggr_is_online      = Gauge("ontap_aggregate_online","Aggregate online (1/0)", labels_aggr, registry=registry)
+
+cluster_info        = Gauge("ontap_cluster_info","Cluster info (always 1)", ["cluster","version"], registry=registry)
+
+# ========= Helpers =========
+def _get(url, params=None):
+    records = []
+    next_url, next_params = url, (params or {})
+    while True:
+        r = SESS.get(next_url, params=next_params, auth=AUTH, timeout=HTTP_TIMEOUT)
+        if r.status_code != 200:
+            raise RuntimeError(f"GET {next_url} -> {r.status_code} {r.text}")
+        j = r.json()
+        records.extend(j.get("records", []))
+        links = j.get("_links") or j.get("links") or {}
+        next_link = (links.get("next") or {}).get("href")
+        if not next_link:
+            break
+        if next_link.startswith("http"):
+            next_url, next_params = next_link, None
+        else:
+            next_url, next_params = BASE + next_link, None
+    return records
+
+def safe_get(d, path, default=None):
+    cur = d
+    for p in path.split("."):
+        if not isinstance(cur, dict) or p not in cur:
+            return default
+        cur = cur[p]
+    return cur
+
+def fnum(x):
+    try: return float(x)
+    except (TypeError, ValueError): return math.nan
+
+# ========= Collectors =========
+def collect_cluster_meta():
+    recs = _get(f"{BASE}/cluster")
+    if not recs:
+        cname, ver = "unknown","unknown"
+    else:
+        c = recs[0]
+        cname = c.get("name","unknown")
+        ver   = safe_get(c,"version.full","unknown")
+    cluster_info.labels(cluster=cname, version=ver).set(1)
+    return cname
+
+def collect_aggregates(cluster_name):
+    params = {"fields":"name,uuid,node.name,state,ha_policy,space.size,space.used"}
+    for ag in _get(f"{BASE}/storage/aggregates", params=params):
+        lbl = {
+            "cluster": cluster_name,
+            "aggregate": ag.get("name",""),
+            "uuid": ag.get("uuid",""),
+            "node": safe_get(ag,"node.name",""),
+            "state": ag.get("state",""),
+            "ha_policy": ag.get("ha_policy",""),
+        }
+        size_b = fnum(safe_get(ag,"space.size"))
+        used_b = fnum(safe_get(ag,"space.used"))
+        used_pct = (used_b/size_b*100.0) if (size_b and size_b>0) else math.nan
+        aggr_size_bytes.labels(**lbl).set(0 if math.isnan(size_b) else size_b)
+        aggr_used_bytes.labels(**lbl).set(0 if math.isnan(used_b) else used_b)
+        if not math.isnan(used_pct): aggr_used_percent.labels(**lbl).set(used_pct)
+        aggr_is_online.labels(**lbl).set(1 if lbl["state"].lower()=="online" else 0)
+
+def collect_volume_by_uuid(cluster_name, uuid):
+    # pull a single volume
+    fields = ",".join([
+        "name","uuid","svm.name","state","style","encryption.is_encrypted",
+        "tiering.policy","space.size","space.used","space.snapshot.used",
+        "inodes.percent_used"
+    ])
+    v = _get(f"{BASE}/storage/volumes/{uuid}", params={"fields":fields})
+    # /{uuid} returns an object, not list; _get expects list. Use direct GET:
+    r = SESS.get(f"{BASE}/storage/volumes/{uuid}", params={"fields":fields}, auth=AUTH, timeout=HTTP_TIMEOUT)
+    if r.status_code != 200:
+        raise RuntimeError(f"GET volume uuid={uuid} -> {r.status_code} {r.text}")
+    v = r.json()
+
+    lbl = {
+        "cluster": cluster_name,
+        "svm": safe_get(v,"svm.name",""),
+        "volume": v.get("name",""),
+        "uuid": v.get("uuid",""),
+        "state": v.get("state",""),
+        "style": v.get("style",""),
+        "tiering_policy": safe_get(v,"tiering.policy","") or "",
+    }
+    size_b = fnum(safe_get(v,"space.size"))
+    used_b = fnum(safe_get(v,"space.used"))
+    snap_b = fnum(safe_get(v,"space.snapshot.used"))
+    used_pct = (used_b/size_b*100.0) if (size_b and size_b>0) else math.nan
+    inode_pct = fnum(safe_get(v,"inodes.percent_used"))
+
+    vol_size_bytes.labels(**lbl).set(0 if math.isnan(size_b) else size_b)
+    vol_used_bytes.labels(**lbl).set(0 if math.isnan(used_b) else used_b)
+    if not math.isnan(used_pct): vol_used_percent.labels(**lbl).set(used_pct)
+    if not math.isnan(inode_pct): vol_inode_used_pct.labels(**lbl).set(inode_pct)
+    vol_snapshot_used_b.labels(**lbl).set(0 if math.isnan(snap_b) else snap_b)
+    vol_is_online.labels(**lbl).set(1 if lbl["state"].lower()=="online" else 0)
+    vol_is_encrypted.labels(**lbl).set(1 if safe_get(v,"encryption.is_encrypted",False) else 0)
+
+def collect_volumes(cluster_name):
+    fields = ",".join([
+        "name","uuid","svm.name","state","style","encryption.is_encrypted",
+        "tiering.policy","space.size","space.used","space.snapshot.used",
+        "inodes.percent_used"
+    ])
+    for v in _get(f"{BASE}/storage/volumes", params={"fields":fields}):
+        if FILTER_VOLUME_UUIDS and v.get("uuid") not in FILTER_VOLUME_UUIDS:
+            continue
+        lbl = {
+            "cluster": cluster_name,
+            "svm": safe_get(v,"svm.name",""),
+            "volume": v.get("name",""),
+            "uuid": v.get("uuid",""),
+            "state": v.get("state",""),
+            "style": v.get("style",""),
+            "tiering_policy": safe_get(v,"tiering.policy","") or "",
+        }
+        size_b = fnum(safe_get(v,"space.size"))
+        used_b = fnum(safe_get(v,"space.used"))
+        snap_b = fnum(safe_get(v,"space.snapshot.used"))
+        used_pct = (used_b/size_b*100.0) if (size_b and size_b>0) else math.nan
+        inode_pct = fnum(safe_get(v,"inodes.percent_used"))
+        vol_size_bytes.labels(**lbl).set(0 if math.isnan(size_b) else size_b)
+        vol_used_bytes.labels(**lbl).set(0 if math.isnan(used_b) else used_b)
+        if not math.isnan(used_pct): vol_used_percent.labels(**lbl).set(used_pct)
+        if not math.isnan(inode_pct): vol_inode_used_pct.labels(**lbl).set(inode_pct)
+        vol_snapshot_used_b.labels(**lbl).set(0 if math.isnan(snap_b) else snap_b)
+        vol_is_online.labels(**lbl).set(1 if lbl["state"].lower()=="online" else 0)
+        vol_is_encrypted.labels(**lbl).set(1 if safe_get(v,"encryption.is_encrypted",False) else 0)
+
+def scrape_once():
+    cname = collect_cluster_meta()
+    collect_aggregates(cname)
+    if FILTER_VOLUME_UUIDS:
+        for uuid in FILTER_VOLUME_UUIDS:
+            collect_volume_by_uuid(cname, uuid)
+    else:
+        collect_volumes(cname)
+
+def _stop(*_):
+    sys.exit(0)
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+    start_http_server(LISTEN_PORT, registry=registry)
+    print(f"[ontap-exporter] /metrics on :{LISTEN_PORT}")
+    while True:
+        try:
+            scrape_once()
+        except Exception as e:
+            print(f"[ontap-exporter] scrape error: {e}", file=sys.stderr)
+        time.sleep(SCRAPE_EVERY)
+================================================================================================
+================================================================================================
+================================================================================================
+
+[lu3782@sdpappb1015 ~]$ cat netapp.py 
+import time
+import argparse
+from netapp_ontap import HostConnection, NetAppRestError
+from netapp_ontap.resources import Volume, Aggregate, Svm, Node, Disk, Lun, Snapshot
+from prometheus_client import start_http_server, Gauge
+import ssl, time, os
+
+def define_metrics():
+    return {
+        # Volumes
+        'volume_size': Gauge('netapp_volume_size_bytes',      'ONTAP volume size (bytes)',                  ['volume']),
+        'volume_used': Gauge('netapp_volume_used_bytes',      'ONTAP volume used space (bytes)',            ['volume']),
+        'volume_available': Gauge('netapp_volume_available_bytes', 'ONTAP volume available space (bytes)', ['volume']),
+        'volume_count': Gauge('netapp_volume_count',          'Number of ONTAP volumes'),
+
+        # Aggregates
+        'aggregate_size': Gauge('netapp_aggregate_size_bytes',      'ONTAP aggregate size (bytes)',                  ['aggregate']),
+        'aggregate_used': Gauge('netapp_aggregate_used_bytes',      'ONTAP aggregate used space (bytes)',            ['aggregate']),
+        'aggregate_available': Gauge('netapp_aggregate_available_bytes', 'ONTAP aggregate available space (bytes)', ['aggregate']),
+        'aggregate_count': Gauge('netapp_aggregate_count',          'Number of ONTAP aggregates'),
+
+        # Other counts
+        'svm_count':      Gauge('netapp_svm_count',      'Number of SVMs'),
+        'node_count':     Gauge('netapp_node_count',     'Number of cluster nodes'),
+        'disk_count':     Gauge('netapp_disk_count',     'Number of disks'),
+        'lun_count':      Gauge('netapp_lun_count',      'Number of LUNs'),
+        'snapshot_count': Gauge('netapp_snapshot_count', 'Number of snapshots'),
+    }
+
+def safe_refresh(resource, conn):
+
+    try:
+        # Trigger an attribute access
+        getattr(resource, 'name')
+        # If it lacks size or space, refresh from the API
+        if not hasattr(resource, 'size') or not hasattr(resource, 'space'):
+            return resource.get(connection=conn)
+        return resource
+    except Exception:
+        return resource
+
+def collect_and_update(conn, metrics):
+    try:
+        # Volumes
+        vols = list(Volume.get_collection(connection=conn))
+        metrics['volume_count'].set(len(vols))
+        for v in vols:
+            v = safe_refresh(v, conn)
+            name = v.name
+            try:
+                total = int(v.size.total)
+                used  = int(v.space.used)
+                avail = int(v.space.available)
+            except Exception as e:
+                print(f"[Warning] skipping volume '{name}': {e}")
+                continue
+            metrics['volume_size'].labels(volume=name).set(total)
+            metrics['volume_used'].labels(volume=name).set(used)
+            metrics['volume_available'].labels(volume=name).set(avail)
+
+        # Aggregates
+        aggs = list(Aggregate.get_collection(connection=conn))
+        metrics['aggregate_count'].set(len(aggs))
+        for a in aggs:
+            a = safe_refresh(a, conn)
+            name = a.name
+            try:
+                total = int(a.size.total)
+                used  = int(a.space.used)
+                avail = int(a.space.available)
+            except Exception as e:
+                print(f"[Warning] skipping aggregate '{name}': {e}")
+                continue
+            metrics['aggregate_size'].labels(aggregate=name).set(total)
+            metrics['aggregate_used'].labels(aggregate=name).set(used)
+            metrics['aggregate_available'].labels(aggregate=name).set(avail)
+
+        # Other counts
+        metrics['svm_count'].set(len(list(Svm.get_collection(connection=conn))))
+        metrics['node_count'].set(len(list(Node.get_collection(connection=conn))))
+        metrics['disk_count'].set(len(list(Disk.get_collection(connection=conn))))
+        metrics['lun_count'].set(len(list(Lun.get_collection(connection=conn))))
+        metrics['snapshot_count'].set(len(list(Snapshot.get_collection(connection=conn))))
+
+    except NetAppRestError as e:
+        print(f"[Error] could not fetch ONTAP metrics: {e}")
+
+def main():
+
+    conn = HostConnection(
+        os.environ['NETAPP_HOST'],
+        username=os.environ['NETAPP_USER'],
+        password=os.environ['NETAPP_PASS'],
+        verify=False
+    )
+
+    metrics = define_metrics()
+    start_http_server(9000)
+    print(f"Exporter started)")
+
+    while True:
+        collect_and_update(conn, metrics)
+        time.sleep(10)
+
+if __name__ == '__main__':
+    main()
+================================================================================================
+================================================================================================
+================================================================================================
+#!/usr/bin/env python3
+import os, sys, time, math, signal, logging, requests
+from requests.auth import HTTPBasicAuth
+from requests.exceptions import RequestException
+from prometheus_client import start_http_server, Gauge, CollectorRegistry, ProcessCollector, PlatformCollector
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+# Prometheus registry
+registry = CollectorRegistry()
+ProcessCollector(registry=registry)
+PlatformCollector(registry=registry)
+
+# ========= Config =========
+ONTAP_HOST   = os.getenv("NETAPP_HOST")
+ONTAP_USER   = os.getenv("NETAPP_USER")
+ONTAP_PASS   = os.getenv("NETAPP_PASS")
+ONTAP_VERIFY = os.getenv("ONTAP_VERIFY", "false").lower() in ("1", "true", "yes")
+ONTAP_CA_BUNDLE = os.getenv("ONTAP_CA_BUNDLE")
+SCRAPE_EVERY = int(os.getenv("SCRAPE_EVERY", "15"))
+LISTEN_PORT  = int(os.getenv("LISTEN_PORT", "9000"))
+HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "10"))
+FILTER_VOLUME_UUIDS = [u.strip() for u in os.getenv("FILTER_VOLUME_UUIDS", "").split(",") if u.strip()]
+
+BASE = f"https://{ONTAP_HOST}/api"
+AUTH = HTTPBasicAuth(ONTAP_USER, ONTAP_PASS)
+
+SESS = requests.Session()
+SESS.verify = ONTAP_CA_BUNDLE if ONTAP_CA_BUNDLE else ONTAP_VERIFY
+
+# ========= Metrics =========
+labels_vol = ["cluster", "svm", "volume", "uuid", "state", "style", "tiering_policy"]
+labels_aggr = ["cluster", "aggregate", "uuid", "node", "state", "ha_policy"]
+
+vol_size_bytes      = Gauge("ontap_volume_size_bytes", "Provisioned volume size (bytes)", labels_vol, registry=registry)
+vol_used_bytes      = Gauge("ontap_volume_used_bytes", "Logical used bytes", labels_vol, registry=registry)
+vol_used_percent    = Gauge("ontap_volume_used_percent", "Used %", labels_vol, registry=registry)
+vol_inode_used_pct  = Gauge("ontap_volume_inodes_used_percent", "Inodes used %", labels_vol, registry=registry)
+vol_is_online       = Gauge("ontap_volume_online", "Volume online (1/0)", labels_vol, registry=registry)
+vol_is_encrypted    = Gauge("ontap_volume_encrypted", "Volume is encrypted (1/0)", labels_vol, registry=registry)
+vol_snapshot_used_b = Gauge("ontap_volume_snapshot_used_bytes", "Snapshot used (bytes)", labels_vol, registry=registry)
+
+aggr_size_bytes     = Gauge("ontap_aggregate_size_bytes", "Aggregate size (bytes)", labels_aggr, registry=registry)
+aggr_used_bytes     = Gauge("ontap_aggregate_used_bytes", "Aggregate used (bytes)", labels_aggr, registry=registry)
+aggr_used_percent   = Gauge("ontap_aggregate_used_percent", "Aggregate used %", labels_aggr, registry=registry)
+aggr_is_online      = Gauge("ontap_aggregate_online", "Aggregate online (1/0)", labels_aggr, registry=registry)
+
+cluster_info        = Gauge("ontap_cluster_info", "Cluster info (always 1)", ["cluster", "version"], registry=registry)
+
+# ========= Helpers =========
+def safe_get(d, path, default=None):
+    cur = d
+    for p in path.split("."):
+        if not isinstance(cur, dict) or p not in cur:
+            return default
+        cur = cur[p]
+    return cur
+
+def fnum(x):
+    try: return float(x)
+    except (TypeError, ValueError): return math.nan
+
+def _get(url, params=None, retries=3):
+    for attempt in range(retries):
+        try:
+            r = SESS.get(url, params=params, auth=AUTH, timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+            j = r.json()
+            records = j.get("records", [])
+            next_link = j.get("_links", {}).get("next", {}).get("href")
+            if next_link:
+                next_url = BASE + next_link if not next_link.startswith("http") else next_link
+                records += _get(next_url, None)
+            return records
+        except RequestException as e:
+            logging.warning(f"GET failed ({attempt+1}/{retries}): {e}")
+            time.sleep(2)
+    raise RuntimeError(f"Failed to GET {url} after {retries} attempts")
+
+# ========= Collectors =========
+def collect_cluster_meta():
+    recs = _get(f"{BASE}/cluster")
+    if not recs:
+        cname, ver = "unknown", "unknown"
+    else:
+        c = recs[0]
+        cname = c.get("name", "unknown")
+        ver = safe_get(c, "version.full", "unknown")
+    cluster_info.labels(cluster=cname, version=ver).set(1)
+    return cname
+
+def collect_aggregates(cluster_name):
+    params = {"fields": "name,uuid,node.name,state,ha_policy,space.size,space.used"}
+    for ag in _get(f"{BASE}/storage/aggregates", params=params):
+        lbl = {
+            "cluster": cluster_name,
+            "aggregate": ag.get("name", ""),
+            "uuid": ag.get("uuid", ""),
+            "node": safe_get(ag, "node.name", ""),
+            "state": ag.get("state", ""),
+            "ha_policy": ag.get("ha_policy", ""),
+        }
+        size_b = fnum(safe_get(ag, "space.size"))
+        used_b = fnum(safe_get(ag, "space.used"))
+        used_pct = (used_b / size_b * 100.0) if size_b > 0 else math.nan
+
+        aggr_size_bytes.labels(**lbl).set(size_b if not math.isnan(size_b) else 0)
+        aggr_used_bytes.labels(**lbl).set(used_b if not math.isnan(used_b) else 0)
+        aggr_used_percent.labels(**lbl).set(used_pct if not math.isnan(used_pct) else 0)
+        aggr_is_online.labels(**lbl).set(1 if lbl["state"].lower() == "online" else 0)
+
+def collect_volume_metrics(v, cluster_name):
+    lbl = {
+        "cluster": cluster_name,
+        "svm": safe_get(v, "svm.name", ""),
+        "volume": v.get("name", ""),
+        "uuid": v.get("uuid", ""),
+        "state": v.get("state", ""),
+        "style": v.get("style", ""),
+        "tiering_policy": safe_get(v, "tiering.policy", "") or "",
+    }
+
+    size_b = fnum(safe_get(v, "space.size"))
+    used_b = fnum(safe_get(v, "space.used"))
+    snap_b = fnum(safe_get(v, "space.snapshot.used"))
+    inode_pct = fnum(safe_get(v, "inodes.percent_used"))
+    used_pct = (used_b / size_b * 100.0) if size_b > 0 else math.nan
+
+    vol_size_bytes.labels(**lbl).set(size_b if not math.isnan(size_b) else 0)
+    vol_used_bytes.labels(**lbl).set(used_b if not math.isnan(used_b) else 0)
+    vol_snapshot_used_b.labels(**lbl).set(snap_b if not math.isnan(snap_b) else 0)
+    vol_inode_used_pct.labels(**lbl).set(inode_pct if not math.isnan(inode_pct) else 0)
+    vol_used_percent.labels(**lbl).set(used_pct if not math.isnan(used_pct) else 0)
+    vol_is_online.labels(**lbl).set(1 if lbl["state"].lower() == "online" else 0)
+    vol_is_encrypted.labels(**lbl).set(1 if safe_get(v, "encryption.is_encrypted", False) else 0)
+
+def collect_volumes(cluster_name):
+    fields = ",".join([
+        "name", "uuid", "svm.name", "state", "style", "encryption.is_encrypted",
+        "tiering.policy", "space.size", "space.used", "space.snapshot.used",
+        "inodes.percent_used"
+    ])
+    for v in _get(f"{BASE}/storage/volumes", params={"fields": fields}):
+        if FILTER_VOLUME_UUIDS and v.get("uuid") not in FILTER_VOLUME_UUIDS:
+            continue
+        collect_volume_metrics(v, cluster_name)
+
+# ========= Main Loop =========
+def scrape_once():
+    try:
+        cname = collect_cluster_meta()
+        collect_aggregates(cname)
+        collect_volumes(cname)
+    except Exception as e:
+        logging.error(f"Scrape error: {e}")
+
+def _stop(*_):
+    logging.info("Exporter shutting down.")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+
+    start_http_server(LISTEN_PORT, registry=registry)
+
+    logging.info(f"ONTAP exporter running on port {LISTEN_PORT}, scraping every {SCRAPE_EVERY}s")
+
+
+
+    while True:
+
+        scrape_once()
+
+        time.sleep(SCRAPE_EVERY)
+
+

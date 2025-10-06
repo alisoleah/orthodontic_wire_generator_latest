@@ -43,6 +43,7 @@ class EnhancedControlPanel(QWidget):
     active_arch_changed = pyqtSignal(str)  # arch_type
     show_both_changed = pyqtSignal(bool)  # show_both
     wire_generated = pyqtSignal()
+    interaction_mode_requested = pyqtSignal(str)  # mode (DEFINE_PLANE, PLACE_POINTS, etc.)
     
     def __init__(self, workflow_manager: WorkflowManager, parent=None):
         super().__init__(parent)
@@ -72,7 +73,8 @@ class EnhancedControlPanel(QWidget):
         self.load_upper_btn = QPushButton("Load Upper Arch (.stl)")
         self.load_upper_btn.clicked.connect(lambda: self.load_arch('upper'))
         self.upper_status = QLabel("Not loaded")
-        self.upper_status.setStyleSheet("color: gray;")\n        upper_layout.addWidget(self.load_upper_btn)
+        self.upper_status.setStyleSheet("color: gray;")
+        upper_layout.addWidget(self.load_upper_btn)
         upper_layout.addWidget(self.upper_status)
         file_layout.addLayout(upper_layout)
         
@@ -550,9 +552,11 @@ class EnhancedControlPanel(QWidget):
     
     def start_occlusal_plane_definition(self):
         """Start placing points for occlusal plane"""
-        # This would set the visualizer to plane definition mode
         self.start_plane_btn.setText("Placing Points... (Click on 3 tooth tips)")
         self.start_plane_btn.setEnabled(False)
+        self.reset_plane_btn.setEnabled(True)
+        # Emit signal to set visualizer to plane definition mode
+        self.interaction_mode_requested.emit('DEFINE_PLANE')
     
     def reset_occlusal_plane(self):
         """Reset occlusal plane"""
@@ -563,8 +567,9 @@ class EnhancedControlPanel(QWidget):
     
     def start_control_point_placement(self):
         """Start placing control points"""
-        # This would set the visualizer to point placement mode
         self.start_points_btn.setText("Placing Points... (Click on tooth surfaces)")
+        # Emit signal to set visualizer to point placement mode
+        self.interaction_mode_requested.emit('PLACE_POINTS')
     
     def remove_last_control_point(self):
         """Remove last placed control point"""

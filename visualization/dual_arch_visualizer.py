@@ -19,11 +19,21 @@ from typing import Optional, List, Dict, Any, Tuple
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from PyQt5.QtOpenGL import QOpenGLWidget
     from PyQt5.QtWidgets import QWidget
     from PyQt5.QtCore import Qt, pyqtSignal, QPoint
     from PyQt5.QtGui import QMouseEvent
-    
+    PYQT5_AVAILABLE = True
+
+    # Try to import QOpenGLWidget from different locations (newer vs older PyQt5)
+    try:
+        from PyQt5.QtWidgets import QOpenGLWidget
+    except ImportError:
+        try:
+            from PyQt5.QtOpenGL import QOpenGLWidget
+        except ImportError:
+            QOpenGLWidget = QWidget
+            print("QOpenGLWidget not available, using QWidget instead")
+
     try:
         from OpenGL.GL import *
         from OpenGL.GLU import *
@@ -31,13 +41,27 @@ try:
     except ImportError:
         print("OpenGL not available, using fallback visualization")
         OPENGL_AVAILABLE = False
-        
+
 except ImportError:
     print("PyQt5 not available, using fallback visualization")
+    PYQT5_AVAILABLE = False
     OPENGL_AVAILABLE = False
+    # Define dummy base class if PyQt5 not available
+    QWidget = object
+    QOpenGLWidget = object
+    Qt = None
+    QPoint = None
+    QMouseEvent = None
+
+    # Define dummy pyqtSignal
+    class pyqtSignal:
+        def __init__(self, *args):
+            pass
+        def emit(self, *args):
+            pass
 
 
-class DualArchVisualizer(QOpenGLWidget if OPENGL_AVAILABLE else QWidget):
+class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE) else QWidget):
     """
     3D visualizer that can display both upper and lower arches
     """
@@ -99,13 +123,32 @@ class DualArchVisualizer(QOpenGLWidget if OPENGL_AVAILABLE else QWidget):
     
     def load_arch(self, mesh_data: Any, arch_type: str):
         """Load and display an arch"""
+        if mesh_data is None:
+            print(f"Warning: Cannot load {arch_type} arch - mesh_data is None")
+            return
+
         if arch_type == 'upper':
             self.upper_arch_mesh = mesh_data
         elif arch_type == 'lower':
             self.lower_arch_mesh = mesh_data
         elif arch_type == 'opposing':
             self.opposing_arch_mesh = mesh_data
-        
+
+        # Auto-center camera on the loaded mesh
+        try:
+            center = mesh_data.get_center()
+            self.camera_center = [float(center[0]), float(center[1]), float(center[2])]
+
+            # Adjust camera distance based on mesh size
+            bbox = mesh_data.get_axis_aligned_bounding_box()
+            extent = bbox.get_extent()
+            max_extent = max(extent)
+            self.camera_distance = max_extent * 2.5  # Reasonable distance to see entire mesh
+
+            print(f"Loaded {arch_type} arch - Center: {self.camera_center}, Distance: {self.camera_distance:.1f}")
+        except Exception as e:
+            print(f"Warning: Could not auto-center camera: {e}")
+
         if OPENGL_AVAILABLE:
             self.update()
     
@@ -211,18 +254,28 @@ class DualArchVisualizer(QOpenGLWidget if OPENGL_AVAILABLE else QWidget):
             glEnable(GL_BLEND)
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
             glClearColor(0.2, 0.2, 0.2, 1.0)
-            
+
+            # Enable polygon fill mode (not wireframe)
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+
+            # Enable two-sided lighting for better visibility
+            glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE)
+
             # Setup lighting
             glEnable(GL_LIGHTING)
             glEnable(GL_LIGHT0)
-            
+
             light_pos = [10.0, 10.0, 10.0, 1.0]
-            light_ambient = [0.3, 0.3, 0.3, 1.0]
-            light_diffuse = [0.8, 0.8, 0.8, 1.0]
-            
+            light_ambient = [0.4, 0.4, 0.4, 1.0]  # Increased ambient light
+            light_diffuse = [0.9, 0.9, 0.9, 1.0]  # Increased diffuse light
+
             glLightfv(GL_LIGHT0, GL_POSITION, light_pos)
             glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient)
             glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse)
+
+            # Enable color material so colors are visible with lighting
+            glEnable(GL_COLOR_MATERIAL)
+            glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
         
         def resizeGL(self, width: int, height: int):
             """Handle window resize"""
@@ -261,7 +314,15 @@ class DualArchVisualizer(QOpenGLWidget if OPENGL_AVAILABLE else QWidget):
             
             # Draw bracket positions
             if self.show_brackets and len(self.bracket_positions) > 0:
-                for i, bracket_pos in enumerate(self.bracket_positions):
+                for i, bracket_data in enumerate(self.bracket_positions):
+                    # Extract position from bracket dictionary
+                    if isinstance(bracket_data, dict):
+                        bracket_pos = bracket_data.get('position', bracket_data.get('tooth_center', None))
+                        if bracket_pos is None:
+                            continue
+                    else:
+                        bracket_pos = bracket_data
+
                     self.draw_sphere(bracket_pos, radius=0.8, color=self.colors['brackets'])
                     self.draw_text_3d(bracket_pos, f"B{i+1}")
             
@@ -295,15 +356,49 @@ class DualArchVisualizer(QOpenGLWidget if OPENGL_AVAILABLE else QWidget):
         
         def draw_mesh(self, mesh_data: Any, color: Tuple[float, float, float, float]):
             """Draw a mesh with the specified color"""
-            # This is a simplified mesh drawing - in practice, you'd use the actual mesh data
+            if mesh_data is None:
+                return
+
             glColor4f(*color)
-            
+
             # Enable material properties
             glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, color)
-            
-            # Draw mesh triangles (simplified - actual implementation would use mesh vertices/faces)
-            # For now, just draw a placeholder
-            self.draw_placeholder_arch()
+
+            # Draw actual mesh triangles
+            try:
+                vertices = np.asarray(mesh_data.vertices)
+                triangles = np.asarray(mesh_data.triangles)
+
+                if len(vertices) == 0 or len(triangles) == 0:
+                    return
+
+                # Get or compute normals
+                if hasattr(mesh_data, 'triangle_normals') and mesh_data.triangle_normals is not None:
+                    normals = np.asarray(mesh_data.triangle_normals)
+                else:
+                    # Compute normals if not available
+                    mesh_data.compute_triangle_normals()
+                    normals = np.asarray(mesh_data.triangle_normals)
+
+                # Draw triangles with normals for proper lighting
+                glBegin(GL_TRIANGLES)
+                for tri_idx, triangle in enumerate(triangles):
+                    # Set normal for this triangle
+                    if tri_idx < len(normals):
+                        normal = normals[tri_idx]
+                        glNormal3f(normal[0], normal[1], normal[2])
+
+                    # Draw the three vertices of the triangle
+                    for vertex_idx in triangle:
+                        vertex = vertices[vertex_idx]
+                        glVertex3f(vertex[0], vertex[1], vertex[2])
+                glEnd()
+            except Exception as e:
+                print(f"Error drawing mesh: {e}")
+                import traceback
+                traceback.print_exc()
+                # Fall back to placeholder if mesh drawing fails
+                self.draw_placeholder_arch()
         
         def draw_placeholder_arch(self):
             """Draw a placeholder arch shape"""
@@ -558,23 +653,28 @@ class DualArchVisualizer(QOpenGLWidget if OPENGL_AVAILABLE else QWidget):
 
 
 # Fallback implementation for systems without OpenGL
-class DualArchVisualizerFallback(QWidget):
+class DualArchVisualizerFallback(QWidget if PYQT5_AVAILABLE else object):
     """Fallback visualizer for systems without OpenGL support"""
-    
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumSize(800, 600)
-        self.setStyleSheet("background-color: #333; color: white;")
-        
-        # Add a label indicating fallback mode
-        from PyQt5.QtWidgets import QVBoxLayout, QLabel
-        layout = QVBoxLayout()
-        label = QLabel("3D Visualization (Fallback Mode)\nOpenGL not available")
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label)
-        self.setLayout(layout)
+        if PYQT5_AVAILABLE:
+            super().__init__(parent)
+            self.setMinimumSize(800, 600)
+            self.setStyleSheet("background-color: #333; color: white;")
+
+            # Add a label indicating fallback mode
+            from PyQt5.QtWidgets import QVBoxLayout, QLabel
+            layout = QVBoxLayout()
+            label = QLabel("3D Visualization (Fallback Mode)\nOpenGL not available")
+            label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(label)
+            self.setLayout(layout)
+        else:
+            super().__init__()
     
     # Implement stub methods for compatibility
+    def setMinimumWidth(self, width): pass
+    def setMinimumHeight(self, height): pass
     def load_arch(self, mesh_data, arch_type): pass
     def set_active_arch(self, arch_type): pass
     def set_show_both_arches(self, show_both): pass

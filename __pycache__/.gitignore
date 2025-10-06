@@ -1,0 +1,5 @@
+# Ignore temporary verification files
+files/njules-scratch/
+# Python cache
+__pycache__/
+*.pyc
