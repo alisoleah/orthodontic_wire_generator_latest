@@ -312,16 +312,22 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                     glPushMatrix()
 
                     # Apply a downward translation to separate the lower arch from the upper
-                    translate_y = -self.lower_arch_mesh.bounds[1][1] * 0.2 if self.show_both else 0
+                    if self.show_both:
+                        bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
+                        translate_y = -bbox.max_bound[1] * 0.2
+                    else:
+                        translate_y = 0
                     glTranslatef(0, translate_y, 0)
 
                     # Apply hinge rotation for jaw simulation
-                    if self.jaw_rotation_angle > 0:
+                    if hasattr(self, 'jaw_rotation_angle') and self.jaw_rotation_angle > 0:
                         # Calculate an approximate hinge point at the back of the jaw
-                        bounds = self.lower_arch_mesh.bounds
-                        center_x = (bounds[0][0] + bounds[1][0]) / 2
-                        center_z = (bounds[0][2] + bounds[1][2]) / 2
-                        hinge_y = bounds[0][1]  # Y-min, assuming this is the back
+                        bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
+                        min_bound = bbox.min_bound
+                        max_bound = bbox.max_bound
+                        center_x = (min_bound[0] + max_bound[0]) / 2
+                        center_z = (min_bound[2] + max_bound[2]) / 2
+                        hinge_y = min_bound[1]  # Y-min, assuming this is the back
 
                         # Translate to hinge, rotate, and translate back
                         glTranslatef(center_x, hinge_y, center_z)
