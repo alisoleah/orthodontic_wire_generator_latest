@@ -1,0 +1,64 @@
+# Hybrid Orthodontic Wire Generator Requirements
+# Enhanced version with PyQt5 GUI and OpenGL 3D visualization
+
+# Core GUI Framework
+PyQt5>=5.15.0
+PyQt5-Qt5>=5.15.0
+PyQt5-sip>=12.8.0
+
+# 3D Visualization
+PyOpenGL>=3.1.0
+PyOpenGL-accelerate>=3.1.0
+
+# Scientific Computing (Core)
+numpy>=1.19.0
+scipy>=1.5.0
+
+# 3D Mesh Processing
+trimesh>=3.9.0
+networkx>=2.5
+
+# Visualization and Plotting
+matplotlib>=3.3.0
+plotly>=4.14.0
+
+# Image Processing
+Pillow>=8.0.0
+
+# File I/O and Data Processing
+pandas>=1.1.0
+openpyxl>=3.0.0
+
+# Mathematical Operations
+scikit-learn>=0.24.0
+scikit-image>=0.17.0
+
+# Mesh and Geometry Processing
+meshio>=4.3.0
+pymeshlab>=2021.10
+
+# Additional Utilities
+tqdm>=4.50.0
+colorama>=0.4.4
+
+# Development and Testing (Optional)
+pytest>=6.0.0
+pytest-qt>=4.0.0
+black>=21.0.0
+flake8>=3.8.0
+
+# Original Project Dependencies
+# (Maintaining compatibility with existing codebase)
+tkinter-tooltip>=2.0.0
+python-dateutil>=2.8.0
+six>=1.15.0
+
+# Platform-specific dependencies
+# Windows
+pywin32>=227; sys_platform == "win32"
+
+# macOS
+pyobjc-framework-Cocoa>=7.0; sys_platform == "darwin"
+
+# Linux
+python3-tk>=0.1.0; sys_platform == "linux"
