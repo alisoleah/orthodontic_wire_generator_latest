@@ -44,6 +44,7 @@ class EnhancedControlPanel(QWidget):
     show_both_changed = pyqtSignal(bool)  # show_both
     wire_generated = pyqtSignal()
     interaction_mode_requested = pyqtSignal(str)  # mode (DEFINE_PLANE, PLACE_POINTS, etc.)
+    control_points_converted = pyqtSignal(list) # list of control points
     
     def __init__(self, workflow_manager: WorkflowManager, parent=None):
         super().__init__(parent)
@@ -595,19 +596,24 @@ class EnhancedControlPanel(QWidget):
     # ============================================
     
     def convert_auto_to_manual(self):
-        """Convert automatic wire to editable control points"""
+        """Convert automatic wire to editable control points and update the visualizer."""
         try:
             arch_type = 'upper' if self.active_upper.isChecked() else 'lower'
             control_points = self.workflow_manager.extract_control_points_from_auto(arch_type)
             
-            self.enable_drag_btn.setEnabled(True)
-            
-            QMessageBox.information(
-                self,
-                "Converted to Manual Mode",
-                f"Generated {len(control_points)} control points from automatic wire.\n"
-                "You can now drag these points to refine the wire path."
-            )
+            if control_points:
+                self.control_points_converted.emit(control_points)
+                self.enable_drag_btn.setEnabled(True)
+
+                QMessageBox.information(
+                    self,
+                    "Converted to Manual Mode",
+                    f"Generated {len(control_points)} control points from the automatic wire.\n"
+                    "You can now drag these points to refine the wire path."
+                )
+            else:
+                QMessageBox.warning(self, "Conversion Failed", "No automatic wire path available to convert.")
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to convert to manual mode:\n{str(e)}")
     

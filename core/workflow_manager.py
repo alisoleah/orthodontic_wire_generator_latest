@@ -399,10 +399,17 @@ class WorkflowManager:
         arch_data = self.get_arch_data(arch_type)
         if arch_data is None or len(arch_data['control_points']) < 2:
             raise ValueError(f"Need at least 2 control points for {arch_type} arch")
+
+        # Get arch center for proper wire generation
+        arch_center = arch_data['mesh'].get_center()
         
+        # Convert control points (numpy arrays) to the dictionary format expected by the wire path creator
+        control_points_as_dicts = [{'position': p} for p in arch_data['control_points']]
+
         # Generate smooth wire path through control points
         wire_path = self.wire_path_creator_enhanced.create_smooth_path(
-            arch_data['control_points'],
+            control_points_as_dicts,
+            arch_center,
             height_offset=0.0  # Height already applied to control points
         )
         

@@ -225,6 +225,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.control_panel.show_both_changed.connect(self.on_show_both_changed)
         self.control_panel.wire_generated.connect(self.on_wire_generated)
         self.control_panel.interaction_mode_requested.connect(self.on_interaction_mode_requested)
+        self.control_panel.control_points_converted.connect(self.on_control_points_converted)
         
         # Visualizer signals
         self.visualizer.point_added.connect(self.on_point_added)
@@ -365,16 +366,42 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
             self.status_panel.update_wire_info(arch_data['wire_path'])
             self.update_status("Wire generated successfully")
     
-    def on_point_added(self, point, point_type: str):
-        """Handle point addition in visualizer"""
-        if point_type == 'plane':
-            count = len(self.workflow_manager.occlusal_plane_points)
-            self.update_status(f"Occlusal plane point {count}/3 added")
-        elif point_type == 'control':
-            arch_data = self.workflow_manager.get_active_arch_data()
-            if arch_data:
-                count = len(arch_data['control_points'])
-                self.update_status(f"Control point {count} added")
+    def on_point_added(self, point: np.ndarray, point_type: str):
+        """Handle point addition in visualizer and update workflow manager."""
+        try:
+            if point_type == 'plane':
+                if len(self.workflow_manager.occlusal_plane_points) < 3:
+                    self.workflow_manager.occlusal_plane_points.append(point)
+                    count = len(self.workflow_manager.occlusal_plane_points)
+                    self.update_status(f"Occlusal plane point {count}/3 added")
+
+                    # Update the control panel button text
+                    if hasattr(self.control_panel, 'start_plane_btn'):
+                        self.control_panel.start_plane_btn.setText(f"Placing Points... ({count}/3)")
+
+                    if count == 3:
+                        self.workflow_manager.set_occlusal_plane_points(self.workflow_manager.occlusal_plane_points)
+                        self.update_status("Occlusal plane defined. You can now place control points.")
+                        if hasattr(self.control_panel, 'start_points_btn'):
+                            self.control_panel.start_points_btn.setEnabled(True)  # Enable next step
+
+            elif point_type == 'control':
+                active_arch = self.workflow_manager.get_active_arch()
+                self.workflow_manager.add_control_point(point, active_arch)
+
+                arch_data = self.workflow_manager.get_active_arch_data()
+                if arch_data:
+                    count = len(arch_data['control_points'])
+                    self.update_status(f"Control point {count} added")
+
+                    # Update control panel button text
+                    if hasattr(self.control_panel, 'start_points_btn'):
+                        self.control_panel.start_points_btn.setText(f"Placing Points ({count})")
+                    if hasattr(self.control_panel, 'generate_wire_btn') and count >= 2:
+                        self.control_panel.generate_wire_btn.setEnabled(True)
+
+        except Exception as e:
+            self.update_status(f"Error adding point: {str(e)}")
     
     def on_point_moved(self, index: int, new_position):
         """Handle point movement in visualizer"""
@@ -401,6 +428,12 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         """Handle request to change interaction mode from control panel"""
         self.visualizer.set_interaction_mode(mode)
         self.update_status(f"Switched to {mode} mode")
+
+    def on_control_points_converted(self, control_points: list):
+        """Handle the conversion of an automatic wire to manual control points."""
+        if self.visualizer:
+            self.visualizer.display_editable_control_points(control_points)
+        self.update_status(f"Converted to {len(control_points)} manual control points. Ready for editing.")
 
     # ============================================
     # MENU ACTIONS

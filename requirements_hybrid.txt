@@ -61,4 +61,5 @@ pywin32>=227; sys_platform == "win32"
 pyobjc-framework-Cocoa>=7.0; sys_platform == "darwin"
 
 # Linux
-python3-tk>=0.1.0; sys_platform == "linux"
+# python3-tk is a system dependency and should be installed via apt-get, not pip.
+# The application will rely on the system's pre-installed tkinter.

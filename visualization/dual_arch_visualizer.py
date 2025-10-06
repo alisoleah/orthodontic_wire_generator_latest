@@ -639,17 +639,52 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         self.dragging_point_index = nearest_index
     
     def screen_to_world(self, screen_pos: QPoint) -> Optional[np.ndarray]:
-        """Convert screen coordinates to world coordinates"""
-        # This is a simplified implementation
-        # In practice, you'd use proper OpenGL coordinate transformation
-        
-        # For now, return a placeholder position
-        # This would need proper implementation using gluUnProject
-        return np.array([
-            (screen_pos.x() - self.width()/2) * 0.1,
-            -(screen_pos.y() - self.height()/2) * 0.1,
-            0.0
-        ])
+        """
+        Convert screen coordinates to world coordinates by casting a ray from the camera
+        and finding the intersection with the active mesh.
+        """
+        if not OPENGL_AVAILABLE:
+            return None
+
+        active_mesh = self.upper_arch_mesh if self.active_arch == 'upper' else self.lower_arch_mesh
+        if active_mesh is None:
+            return None
+
+        try:
+            # Get matrices and viewport
+            modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+            projection = glGetDoublev(GL_PROJECTION_MATRIX)
+            viewport = glGetIntegerv(GL_VIEWPORT)
+
+            winX, winY = float(screen_pos.x()), float(viewport[3] - screen_pos.y())
+
+            # Un-project two points to define a ray
+            near_plane = gluUnProject(winX, winY, 0.0, modelview, projection, viewport)
+            far_plane = gluUnProject(winX, winY, 1.0, modelview, projection, viewport)
+
+            if near_plane is None or far_plane is None:
+                return None
+
+            ray_origin = np.array(near_plane)
+            ray_direction = np.array(far_plane) - ray_origin
+            ray_direction = ray_direction / np.linalg.norm(ray_direction)
+
+            # Use trimesh for ray-mesh intersection
+            intersector = active_mesh.ray
+            locations, index_ray, index_tri = intersector.intersects_location(
+                ray_origins=[ray_origin],
+                ray_directions=[ray_direction]
+            )
+
+            if len(locations) > 0:
+                # Return the first intersection point
+                return locations[0]
+            else:
+                return None
+
+        except Exception as e:
+            print(f"Error in screen_to_world (ray-casting): {e}")
+            return None
 
 
 # Fallback implementation for systems without OpenGL
