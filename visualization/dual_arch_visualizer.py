@@ -100,12 +100,14 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         self.camera_rotation = [0, 0]
         self.camera_distance = 100
         self.camera_center = [0, 0, 0]
-        self.camera_pan = [0.0, 0.0, 0.0]
+        self.camera_pan = [0.0, 0.0]
         
         # Mouse interaction
         self.last_mouse_pos = QPoint()
         self.dragging_point_index = -1
-        self.jaw_rotation_angle = 0
+
+        # Visual aid for separating jaws
+        self.lower_arch_offset = [0.0, -10.0, 0.0] # Default offset for visualization
         
         # Colors
         self.colors = {
@@ -124,10 +126,15 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
             self.setMinimumSize(800, 600)
     
     def load_arch(self, mesh_data: Any, arch_type: str):
-        """Load and display an arch"""
+        """Load, center, and display an arch."""
         if mesh_data is None:
             print(f"Warning: Cannot load {arch_type} arch - mesh_data is None")
             return
+
+        # Center the mesh at the origin to ensure consistent alignment
+        center = mesh_data.get_center()
+        mesh_data.translate(-center, relative=True)
+        print(f"Translated {arch_type} mesh by {-center} to center at origin.")
 
         if arch_type == 'upper':
             self.upper_arch_mesh = mesh_data
@@ -136,20 +143,21 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         elif arch_type == 'opposing':
             self.opposing_arch_mesh = mesh_data
 
-        # Auto-center camera on the loaded mesh
-        try:
-            center = mesh_data.get_center()
-            self.camera_center = [float(center[0]), float(center[1]), float(center[2])]
+        # Set camera to look at the common origin
+        self.camera_center = [0.0, 0.0, 0.0]
 
-            # Adjust camera distance based on mesh size
-            bbox = mesh_data.get_axis_aligned_bounding_box()
-            extent = bbox.get_extent()
-            max_extent = max(extent)
-            self.camera_distance = max_extent * 2.5  # Reasonable distance to see entire mesh
-
-            print(f"Loaded {arch_type} arch - Center: {self.camera_center}, Distance: {self.camera_distance:.1f}")
-        except Exception as e:
-            print(f"Warning: Could not auto-center camera: {e}")
+        # Auto-adjust camera distance based on the first loaded mesh that is not None
+        active_mesh = self.upper_arch_mesh if self.upper_arch_mesh is not None else self.lower_arch_mesh
+        if active_mesh:
+            try:
+                # Adjust camera distance based on mesh size
+                bbox = active_mesh.get_axis_aligned_bounding_box()
+                extent = bbox.get_extent()
+                max_extent = max(extent)
+                self.camera_distance = max_extent * 2.0  # Adjust zoom
+                print(f"Adjusted camera distance to {self.camera_distance:.1f} based on {arch_type} arch.")
+            except Exception as e:
+                print(f"Warning: Could not auto-adjust camera distance: {e}")
 
         if OPENGL_AVAILABLE:
             self.update()
@@ -244,12 +252,6 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         """Update wire display"""
         if OPENGL_AVAILABLE:
             self.update()
-
-    def set_jaw_rotation(self, angle: int):
-        """Set the rotation angle for the lower jaw."""
-        self.jaw_rotation_angle = angle
-        if OPENGL_AVAILABLE:
-            self.update()
     
     # ============================================
     # OPENGL RENDERING (if available)
@@ -306,34 +308,13 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                 if self.show_both or self.active_arch == 'upper':
                     self.draw_mesh(self.upper_arch_mesh, self.colors['upper_arch'])
             
-            # Draw lower arch with an offset and rotation for simulation
+            # Draw lower arch
             if self.lower_arch_mesh is not None:
                 if self.show_both or self.active_arch == 'lower':
                     glPushMatrix()
-
-                    # Apply a downward translation to separate the lower arch from the upper
                     if self.show_both:
-                        bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
-                        translate_y = -bbox.max_bound[1] * 0.2
-                    else:
-                        translate_y = 0
-                    glTranslatef(0, translate_y, 0)
-
-                    # Apply hinge rotation for jaw simulation
-                    if hasattr(self, 'jaw_rotation_angle') and self.jaw_rotation_angle > 0:
-                        # Calculate an approximate hinge point at the back of the jaw
-                        bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
-                        min_bound = bbox.min_bound
-                        max_bound = bbox.max_bound
-                        center_x = (min_bound[0] + max_bound[0]) / 2
-                        center_z = (min_bound[2] + max_bound[2]) / 2
-                        hinge_y = min_bound[1]  # Y-min, assuming this is the back
-
-                        # Translate to hinge, rotate, and translate back
-                        glTranslatef(center_x, hinge_y, center_z)
-                        glRotatef(self.jaw_rotation_angle, 1, 0, 0)  # Rotate around X-axis
-                        glTranslatef(-center_x, -hinge_y, -center_z)
-
+                        # Apply visual offset only when both jaws are shown
+                        glTranslatef(self.lower_arch_offset[0], self.lower_arch_offset[1], self.lower_arch_offset[2])
                     self.draw_mesh(self.lower_arch_mesh, self.colors['lower_arch'])
                     glPopMatrix()
             
@@ -590,43 +571,25 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
                 self.add_control_point(event.pos())
             elif self.interaction_mode in ['DRAG_POINTS', 'EDIT_POINTS']:
                 self.start_dragging_point(event.pos())
-        elif event.button() == Qt.RightButton:
-            # Right click for camera rotation
-            self.last_mouse_pos = event.pos()
-        elif event.button() == Qt.MiddleButton:
-            # Middle click for camera panning
+        elif event.button() == Qt.RightButton or event.button() == Qt.MiddleButton:
+            # Right-click for rotation, Middle-click for panning
             self.last_mouse_pos = event.pos()
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        """Handle mouse movement"""
+        """Handle mouse movement for rotation and panning."""
+        dx = event.x() - self.last_mouse_pos.x()
+        dy = event.y() - self.last_mouse_pos.y()
+
         if event.buttons() & Qt.RightButton:
             # Camera rotation
-            dx = event.x() - self.last_mouse_pos.x()
-            dy = event.y() - self.last_mouse_pos.y()
-            
             self.camera_rotation[1] += dx * 0.5
             self.camera_rotation[0] += dy * 0.5
-            
-            self.last_mouse_pos = event.pos()
-            
-            if OPENGL_AVAILABLE:
-                self.update()
-        
+
         elif event.buttons() & Qt.MiddleButton:
             # Camera panning
-            dx = event.x() - self.last_mouse_pos.x()
-            dy = event.y() - self.last_mouse_pos.y()
-
-            # Adjust pan speed based on zoom level for more intuitive control
             pan_speed = 0.1 * (self.camera_distance / 100.0)
-
             self.camera_pan[0] += dx * pan_speed
-            self.camera_pan[1] -= dy * pan_speed  # Y is inverted in screen coordinates
-
-            self.last_mouse_pos = event.pos()
-
-            if OPENGL_AVAILABLE:
-                self.update()
+            self.camera_pan[1] -= dy * pan_speed # Y is inverted
 
         elif event.buttons() & Qt.LeftButton and self.dragging_point_index >= 0:
             # Drag control point
@@ -634,9 +597,10 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
             if new_position is not None:
                 self.control_points[self.dragging_point_index] = new_position
                 self.point_moved.emit(self.dragging_point_index, new_position)
-                
-                if OPENGL_AVAILABLE:
-                    self.update()
+
+        self.last_mouse_pos = event.pos()
+        if OPENGL_AVAILABLE:
+            self.update()
     
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Handle mouse release"""
