@@ -12,6 +12,7 @@ import numpy as np
 from scipy import interpolate
 from typing import List, Dict, Tuple, Optional
 import math
+from utils.catmull_rom import catmull_rom_spline
 
 class WirePathCreator:
     """
@@ -177,8 +178,16 @@ class WirePathCreator:
             # Use linear interpolation for few points
             return self._linear_interpolation(positions)
         else:
-            # Use cubic spline for smooth curves
-            return self._cubic_spline_interpolation(positions)
+            # Use Catmull-Rom for smooth curves that pass through the points
+            return self._catmull_rom_interpolation(positions)
+
+    def _catmull_rom_interpolation(self, positions: np.ndarray) -> np.ndarray:
+        """Create smooth path using Catmull-Rom spline interpolation."""
+        # The utility function expects a list of arrays
+        point_list = [p for p in positions]
+        # Calculate the number of points for the spline
+        num_points = len(point_list) * self.path_resolution
+        return catmull_rom_spline(point_list, num_points=num_points)
     
     def _cubic_spline_interpolation(self, positions: np.ndarray) -> np.ndarray:
         """Create smooth path using cubic spline interpolation."""
