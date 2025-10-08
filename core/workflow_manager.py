@@ -66,9 +66,6 @@ class WorkflowManager:
         self.esp32_generator = ESP32Generator()
         self.stl_exporter = STLExporter()
         
-        # Occlusal plane for manual mode
-        self.occlusal_plane_points = []
-        self.occlusal_plane_normal = None
         
     def set_mode(self, mode: WorkflowMode):
         """Switch between workflow modes"""
@@ -274,34 +271,6 @@ class WorkflowManager:
     # MANUAL MODE FUNCTIONS
     # ============================================
     
-    def set_occlusal_plane_points(self, points: List[np.ndarray]):
-        """
-        Set the three points that define the occlusal plane
-        
-        Args:
-            points: List of 3 points defining the occlusal plane
-        """
-        if len(points) != 3:
-            raise ValueError("Occlusal plane requires exactly 3 points")
-        
-        self.occlusal_plane_points = points
-        self.occlusal_plane_normal = self._calculate_plane_normal(points)
-    
-    def _calculate_plane_normal(self, points: List[np.ndarray]) -> np.ndarray:
-        """Calculate normal vector from 3 points"""
-        if len(points) < 3:
-            return None
-        
-        v1 = points[1] - points[0]
-        v2 = points[2] - points[0]
-        normal = np.cross(v1, v2)
-        return normal / np.linalg.norm(normal)
-    
-    def reset_occlusal_plane(self):
-        """Reset occlusal plane definition"""
-        self.occlusal_plane_points = []
-        self.occlusal_plane_normal = None
-    
     def add_control_point(self, point: np.ndarray, arch_type: str = None):
         """
         Add a control point for manual wire design
@@ -317,31 +286,11 @@ class WorkflowManager:
         if arch_data is None:
             raise ValueError(f"No {arch_type} arch loaded")
         
-        # Project point to occlusal plane if defined
-        if self.occlusal_plane_normal is not None:
-            projected_point = self._project_to_occlusal_plane(point)
-        else:
-            projected_point = point.copy()
-        
         # Add height offset
-        projected_point[2] += self.global_height_offset
+        adjusted_point = point.copy()
+        adjusted_point[2] += self.global_height_offset
         
-        arch_data['control_points'].append(projected_point)
-    
-    def _project_to_occlusal_plane(self, point: np.ndarray) -> np.ndarray:
-        """Project a point onto the defined occlusal plane"""
-        if len(self.occlusal_plane_points) < 3:
-            return point
-        
-        plane_point = self.occlusal_plane_points[0]
-        normal = self.occlusal_plane_normal
-        
-        # Project point onto plane
-        v = point - plane_point
-        distance = np.dot(v, normal)
-        projected = point - distance * normal
-        
-        return projected
+        arch_data['control_points'].append(adjusted_point)
     
     def remove_last_control_point(self, arch_type: str = None):
         """Remove the last placed control point"""
@@ -399,16 +348,15 @@ class WorkflowManager:
         arch_data = self.get_arch_data(arch_type)
         if arch_data is None or len(arch_data['control_points']) < 2:
             raise ValueError(f"Need at least 2 control points for {arch_type} arch")
-
-        # Get arch center for proper wire generation
-        arch_center = arch_data['mesh'].get_center()
         
-        # Convert control points (numpy arrays) to the dictionary format expected by the wire path creator
-        control_points_as_dicts = [{'position': p} for p in arch_data['control_points']]
+        # Get arch center for wire generation
+        if arch_data.get('mesh') is None:
+            raise ValueError(f"Mesh not loaded for {arch_type} arch.")
+        arch_center = arch_data['mesh'].get_center()
 
         # Generate smooth wire path through control points
         wire_path = self.wire_path_creator_enhanced.create_smooth_path(
-            control_points_as_dicts,
+            arch_data['control_points'],
             arch_center,
             height_offset=0.0  # Height already applied to control points
         )
@@ -455,41 +403,16 @@ class WorkflowManager:
     # EXPORT FUNCTIONS
     # ============================================
     
-    def export_gcode(self, wire_size: float, arch_type: str = None) -> Optional[str]:
-        """Generate G-code for the wire and return it as a string."""
+    def export_gcode(self, file_path: str, arch_type: str = None):
+        """Export wire as G-code"""
         if arch_type is None:
             arch_type = self.active_arch
         
         arch_data = self.get_arch_data(arch_type)
         if arch_data is None or arch_data['wire_path'] is None:
             raise ValueError(f"No wire path to export for {arch_type} arch")
-
-        # Mock bend data and calculate wire length for now
-        # TODO: Implement proper bend calculation
-        wire_path = arch_data['wire_path']
-        wire_length = np.sum(np.linalg.norm(np.diff(wire_path, axis=0), axis=1))
-
-        # Mock bend data
-        bends = []
-        for i in range(1, len(wire_path) - 1):
-            bends.append({
-                'position': wire_path[i],
-                'angle': 90.0,  # Mock angle
-                'radius': 1.0,  # Mock radius
-                'direction': 'CW',
-                'wire_length': np.sum(np.linalg.norm(np.diff(wire_path[:i+1], axis=0), axis=1))
-            })
-
-        gcode_content = self.gcode_generator.generate(
-            wire_path=wire_path,
-            bends=bends,
-            wire_length=wire_length,
-            height_offset=self.global_height_offset,
-            arch_type=arch_type,
-            wire_size=f"{wire_size}mm"
-        )
         
-        return gcode_content
+        self.gcode_generator.generate_gcode(arch_data['wire_path'], file_path)
     
     def export_esp32(self, file_path: str, arch_type: str = None):
         """Export wire as ESP32 Arduino code"""
@@ -526,8 +449,7 @@ class WorkflowManager:
             'lower_loaded': self.lower_arch_data is not None,
             'opposing_loaded': self.opposing_arch_data is not None,
             'dual_arch_loaded': self.is_dual_arch_loaded(),
-            'height_offset': self.global_height_offset,
-            'occlusal_plane_defined': len(self.occlusal_plane_points) == 3
+            'height_offset': self.global_height_offset
         }
     
     def reset_workflow(self):
@@ -537,6 +459,4 @@ class WorkflowManager:
         self.opposing_arch_data = None
         self.active_arch = 'upper'
         self.global_height_offset = 0.0
-        self.occlusal_plane_points = []
-        self.occlusal_plane_normal = None
         self.current_mode = WorkflowMode.AUTOMATIC

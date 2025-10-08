@@ -54,9 +54,6 @@ class EnhancedControlPanel(QWidget):
         self.workflow_manager = workflow_manager
         self.init_ui()
         
-        # Connect workflow manager signals if available
-        # This would be implemented with proper signal/slot mechanism
-        
     def init_ui(self):
         """Initialize the user interface"""
         layout = QVBoxLayout()
@@ -265,7 +262,7 @@ class EnhancedControlPanel(QWidget):
         
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
-        
+
         # ============================================
         # SECTION 8: JAW SIMULATION
         # ============================================
@@ -433,49 +430,30 @@ class EnhancedControlPanel(QWidget):
         self.workflow_steps_layout.addWidget(self.show_brackets_checkbox)
     
     def add_manual_workflow_steps(self):
-        """Add steps for manual mode"""
-        step1 = QLabel("Step 1: Define occlusal plane (3 points)")
+        """Add steps for manual mode using 3-point wire definition."""
+        step1 = QLabel("Step 1: Define Wire Path (3 Points)")
         self.workflow_steps_layout.addWidget(step1)
         
-        plane_layout = QHBoxLayout()
-        self.start_plane_btn = QPushButton("Start Placing Points (0/3)")
-        self.start_plane_btn.clicked.connect(self.start_occlusal_plane_definition)
-        plane_layout.addWidget(self.start_plane_btn)
+        path_layout = QHBoxLayout()
+        self.define_path_btn = QPushButton("Define Wire Path (0/3)")
+        self.define_path_btn.clicked.connect(self.define_wire_path_3_points)
+        path_layout.addWidget(self.define_path_btn)
         
-        self.reset_plane_btn = QPushButton("Reset")
-        self.reset_plane_btn.clicked.connect(self.reset_occlusal_plane)
-        self.reset_plane_btn.setEnabled(False)
-        plane_layout.addWidget(self.reset_plane_btn)
+        self.reset_path_btn = QPushButton("Reset Path")
+        self.reset_path_btn.clicked.connect(self.reset_wire_path)
+        self.reset_path_btn.setEnabled(False)
+        path_layout.addWidget(self.reset_path_btn)
         
-        plane_widget = QWidget()
-        plane_widget.setLayout(plane_layout)
-        self.workflow_steps_layout.addWidget(plane_widget)
+        path_widget = QWidget()
+        path_widget.setLayout(path_layout)
+        self.workflow_steps_layout.addWidget(path_widget)
         
-        step2 = QLabel("Step 2: Place control points on teeth")
+        step2 = QLabel("Step 2: Generate Wire")
         self.workflow_steps_layout.addWidget(step2)
-        
-        points_layout = QHBoxLayout()
-        self.start_points_btn = QPushButton("Start Placing Points (0)")
-        self.start_points_btn.clicked.connect(self.start_control_point_placement)
-        points_layout.addWidget(self.start_points_btn)
-        
-        self.remove_point_btn = QPushButton("Remove Last")
-        self.remove_point_btn.clicked.connect(self.remove_last_control_point)
-        points_layout.addWidget(self.remove_point_btn)
-        
-        self.clear_points_btn = QPushButton("Clear All")
-        self.clear_points_btn.clicked.connect(self.clear_control_points)
-        points_layout.addWidget(self.clear_points_btn)
-        
-        points_widget = QWidget()
-        points_widget.setLayout(points_layout)
-        self.workflow_steps_layout.addWidget(points_widget)
-        
-        step3 = QLabel("Step 3: Generate wire from control points")
-        self.workflow_steps_layout.addWidget(step3)
         
         self.generate_wire_btn = QPushButton("Generate Wire")
         self.generate_wire_btn.clicked.connect(self.generate_manual_wire)
+        self.generate_wire_btn.setEnabled(False)
         self.workflow_steps_layout.addWidget(self.generate_wire_btn)
     
     def add_hybrid_workflow_steps(self):
@@ -582,8 +560,8 @@ class EnhancedControlPanel(QWidget):
     # MANUAL MODE FUNCTIONS
     # ============================================
     
-    def start_occlusal_plane_definition(self):
-        """Launch the PyVista point selector to define the occlusal plane."""
+    def define_wire_path_3_points(self):
+        """Launch the PyVista point selector to define the wire path with 3 points."""
         active_arch = self.workflow_manager.get_active_arch()
         arch_data = self.workflow_manager.get_arch_data(active_arch)
 
@@ -591,7 +569,6 @@ class EnhancedControlPanel(QWidget):
             QMessageBox.warning(self, "No Mesh", "Please load an arch before selecting points.")
             return
 
-        # The parent window for the selector is the main window
         main_window = self.parent().parent().parent()
 
         selector = DentalPointSelector(
@@ -602,61 +579,24 @@ class EnhancedControlPanel(QWidget):
         selected_points = selector.show()
 
         if selected_points and len(selected_points) == 3:
-            self.workflow_manager.set_occlusal_plane_points(selected_points)
-            self.start_plane_btn.setText(f"Points Selected (3/3)")
-            self.reset_plane_btn.setEnabled(True)
-            self.start_points_btn.setEnabled(True) # Enable next step
-            QMessageBox.information(self, "Success", "Occlusal plane points selected successfully.")
-        else:
-            QMessageBox.warning(self, "Selection Canceled", "Point selection was canceled or incomplete.")
-    
-    def reset_occlusal_plane(self):
-        """Reset occlusal plane"""
-        self.workflow_manager.reset_occlusal_plane()
-        self.start_plane_btn.setText("Start Placing Points (0/3)")
-        self.start_plane_btn.setEnabled(True)
-        self.reset_plane_btn.setEnabled(False)
-    
-    def start_control_point_placement(self):
-        """Launch the PyVista point selector for open-ended control point selection."""
-        active_arch = self.workflow_manager.get_active_arch()
-        arch_data = self.workflow_manager.get_arch_data(active_arch)
-
-        if not arch_data or arch_data.get('mesh') is None:
-            QMessageBox.warning(self, "No Mesh", "Please load an arch before selecting points.")
-            return
-
-        # The parent window for the selector is the main window
-        main_window = self.parent().parent().parent()
-
-        selector = DentalPointSelector(
-            o3d_mesh=arch_data['mesh'],
-            parent_window=main_window,
-            n_points=0  # 0 indicates open-ended selection
-        )
-        selected_points = selector.show()
-
-        if selected_points:
-            # Clear previous points and add the new ones
             self.workflow_manager.clear_control_points(active_arch)
             for point in selected_points:
                 self.workflow_manager.add_control_point(point, active_arch)
 
-            self.start_points_btn.setText(f"Points Selected ({len(selected_points)})")
+            self.define_path_btn.setText(f"Path Defined (3/3)")
+            self.reset_path_btn.setEnabled(True)
             self.generate_wire_btn.setEnabled(True)
-            QMessageBox.information(self, "Success", f"{len(selected_points)} control points selected.")
+            QMessageBox.information(self, "Success", "Wire path points selected successfully.")
         else:
-            QMessageBox.warning(self, "Selection Canceled", "No control points were selected.")
-    
-    def remove_last_control_point(self):
-        """Remove last placed control point"""
-        self.workflow_manager.remove_last_control_point()
-        # Update display
-    
-    def clear_control_points(self):
-        """Clear all control points"""
+            QMessageBox.warning(self, "Selection Canceled", "Point selection was canceled or incomplete.")
+
+    def reset_wire_path(self):
+        """Reset the 3-point wire path."""
         self.workflow_manager.clear_control_points()
-        self.start_points_btn.setText("Start Placing Points (0)")
+        self.define_path_btn.setText("Define Wire Path (0/3)")
+        self.define_path_btn.setEnabled(True)
+        self.reset_path_btn.setEnabled(False)
+        self.generate_wire_btn.setEnabled(False)
     
     def generate_manual_wire(self):
         """Generate wire from manually placed control points"""
@@ -672,7 +612,7 @@ class EnhancedControlPanel(QWidget):
     # ============================================
     
     def convert_auto_to_manual(self):
-        """Convert automatic wire to editable control points and update the visualizer."""
+        """Convert automatic wire to editable control points"""
         try:
             arch_type = 'upper' if self.active_upper.isChecked() else 'lower'
             control_points = self.workflow_manager.extract_control_points_from_auto(arch_type)

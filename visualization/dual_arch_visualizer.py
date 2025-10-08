@@ -106,8 +106,8 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         self.last_mouse_pos = QPoint()
         self.dragging_point_index = -1
 
-        # Visual aid for separating jaws
-        self.lower_arch_offset = [0.0, -10.0, 0.0] # Default offset for visualization
+        # Visual aid for separating jaws - calculated dynamically
+        self.lower_arch_offset = np.array([0.0, 0.0, 0.0])
         
         # Colors
         self.colors = {
@@ -143,6 +143,8 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
         elif arch_type == 'opposing':
             self.opposing_arch_mesh = mesh_data
 
+        self._update_arch_positions()
+
         # Set camera to look at the common origin
         self.camera_center = [0.0, 0.0, 0.0]
 
@@ -161,6 +163,22 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
 
         if OPENGL_AVAILABLE:
             self.update()
+
+    def _update_arch_positions(self):
+        """Calculates the visual offset for the lower jaw when both are loaded."""
+        if self.upper_arch_mesh and self.lower_arch_mesh:
+            upper_bbox = self.upper_arch_mesh.get_axis_aligned_bounding_box()
+            lower_bbox = self.lower_arch_mesh.get_axis_aligned_bounding_box()
+
+            # Calculate offset to place lower jaw below upper jaw with a small gap
+            # Assumes meshes are centered at origin.
+            offset_y = upper_bbox.min_bound[1] - lower_bbox.max_bound[1] - 5.0  # 5mm gap
+
+            self.lower_arch_offset = np.array([0.0, offset_y, 0.0])
+            print(f"Dynamically calculated lower arch offset: {self.lower_arch_offset}")
+        else:
+            # If only one arch is loaded, no offset is needed as it's at the origin
+            self.lower_arch_offset = np.array([0.0, 0.0, 0.0])
     
     def set_active_arch(self, arch_type: str):
         """Set which arch is being designed"""
@@ -312,8 +330,8 @@ class DualArchVisualizer(QOpenGLWidget if (PYQT5_AVAILABLE and OPENGL_AVAILABLE)
             if self.lower_arch_mesh is not None:
                 if self.show_both or self.active_arch == 'lower':
                     glPushMatrix()
+                    # Apply offset only when both jaws are shown
                     if self.show_both:
-                        # Apply visual offset only when both jaws are shown
                         glTranslatef(self.lower_arch_offset[0], self.lower_arch_offset[1], self.lower_arch_offset[2])
                     self.draw_mesh(self.lower_arch_mesh, self.colors['lower_arch'])
                     glPopMatrix()

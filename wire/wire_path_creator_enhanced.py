@@ -378,7 +378,7 @@ class WirePathCreatorEnhanced:
         Main wire path generation algorithm with enhancements.
 
         Args:
-            bracket_positions: List of bracket position dictionaries
+            bracket_positions: List of bracket position dictionaries or numpy arrays.
             arch_center: Center point of dental arch
             height_offset: Global height adjustment
 
@@ -388,8 +388,14 @@ class WirePathCreatorEnhanced:
         if not bracket_positions:
             return None
 
+        # Normalize input to handle lists of numpy arrays from manual mode
+        if isinstance(bracket_positions[0], np.ndarray):
+            processed_positions = [{'position': pos, 'visible': True} for pos in bracket_positions]
+        else:
+            processed_positions = bracket_positions
+
         # Step 1: Extract and sort brackets
-        visible_brackets = [b for b in bracket_positions if b.get('visible', True)]
+        visible_brackets = [b for b in processed_positions if b.get('visible', True)]
         if len(visible_brackets) < 2:
             return None
 
