@@ -189,8 +189,12 @@ class WorkflowManager:
         
         # Step 2: Position brackets
         print(f"Positioning brackets...")
-        bracket_positions = self.bracket_positioner.position_brackets(
-            mesh, detected_teeth, arch_type
+        # ✅ FIX: Use correct method name and parameters
+        bracket_positions = self.bracket_positioner.calculate_positions(
+            detected_teeth,        # First parameter: teeth list
+            mesh,                  # Second parameter: mesh
+            arch_data['arch_center'],  # Third parameter: arch_center (was missing!)
+            arch_type              # Fourth parameter: arch_type
         )
         arch_data['bracket_positions'] = bracket_positions
         print(f"Positioned {len(bracket_positions)} brackets ({sum(1 for b in bracket_positions if b.get('visible', True))} visible)")
@@ -204,7 +208,7 @@ class WorkflowManager:
     
     def generate_wire_from_brackets(self, arch_type: str = None) -> np.ndarray:
         """
-        ✅ NEW METHOD: Generate wire path from bracket positions.
+        ✅ FIXED METHOD: Generate wire path from bracket positions.
         This is used for:
         - Automatic mode wire generation
         - Height adjustment in automatic mode
@@ -251,10 +255,10 @@ class WorkflowManager:
                 'vertical_offset': self.global_height_offset
             })
         
-        # Generate smooth wire path through control points
+        # ✅ FIX: Remove samples_per_segment parameter
         wire_path, is_valid = self.wire_path_creator.create_smooth_path(
-            control_points,
-            samples_per_segment=50
+            control_points
+            # Removed: samples_per_segment=50
         )
         
         if not is_valid:
@@ -345,9 +349,9 @@ class WorkflowManager:
         return wire_path
     
     def _generate_wire_following_teeth(self, manual_points: List[Dict], 
-                                       bracket_positions: List[Dict]) -> np.ndarray:
+                                   bracket_positions: List[Dict]) -> np.ndarray:
         """
-        ✅ NEW METHOD: Generate wire that follows teeth between manually selected points.
+        ✅ FIXED METHOD: Generate wire that follows teeth between manually selected points.
         
         Strategy:
         1. Find which brackets are between the 3 selected points
@@ -450,10 +454,10 @@ class WorkflowManager:
             'vertical_offset': self.global_height_offset
         })
         
-        # Generate smooth wire path
+        # ✅ FIX: Remove samples_per_segment parameter
         wire_path, is_valid = self.wire_path_creator.create_smooth_path(
-            all_control_points,
-            samples_per_segment=30
+            all_control_points
+            # Removed: samples_per_segment=30
         )
         
         if not is_valid:
@@ -470,7 +474,7 @@ class WorkflowManager:
         # Generate smooth spline through the manual points
         wire_path, is_valid = self.wire_path_creator.create_smooth_path(
             manual_points,
-            samples_per_segment=50
+            # samples_per_segment=50
         )
         
         return wire_path
