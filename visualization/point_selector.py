@@ -13,8 +13,9 @@ class DentalPointSelector:
 
     def show(self) -> Optional[List[np.ndarray]]:
         """Launch modal selection dialog"""
-        if self.parent:
-            self.parent.wm_attributes("-disabled", True)
+        # Correctly handle modality for PyQt5 parent windows
+        if self.parent and hasattr(self.parent, 'setEnabled'):
+            self.parent.setEnabled(False)
 
         try:
             # Convert mesh
@@ -50,8 +51,8 @@ class DentalPointSelector:
             self.plotter.show()
 
         finally:
-            if self.parent:
-                self.parent.wm_attributes("-disabled", False)
+            if self.parent and hasattr(self.parent, 'setEnabled'):
+                self.parent.setEnabled(True)
 
         return self.selected_points if len(self.selected_points) == self.n_points else None
 

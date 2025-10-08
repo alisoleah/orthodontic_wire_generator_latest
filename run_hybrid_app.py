@@ -131,17 +131,12 @@ def run_application():
         main()
         
     except ImportError as e:
-        print(f"Import error: {e}")
-        print("Falling back to basic application...")
-        
-        try:
-            # Try to run the original application as fallback
-            from run_app import main as fallback_main
-            fallback_main()
-        except Exception as fallback_error:
-            print(f"Fallback application also failed: {fallback_error}")
-            print("Please check your installation and dependencies.")
-            return False
+        print(f"❌ A critical component could not be imported: {e}")
+        print("This is often due to an incomplete installation or a problem with a core module.")
+        print("Please ensure all dependencies from 'requirements_hybrid.txt' are installed correctly.")
+        print("If the problem persists, consider reinstalling the required packages.")
+        traceback.print_exc()
+        return False
     
     except Exception as e:
         print(f"Application error: {e}")
@@ -242,14 +237,6 @@ def main():
                 print("\n[X] Failed to install some dependencies.")
             return
         
-        elif arg == '--fallback':
-            print("Running fallback application...")
-            try:
-                from run_app import main as fallback_main
-                fallback_main()
-            except Exception as e:
-                print(f"Fallback application failed: {e}")
-            return
     
     # Check dependencies first
     print("Hybrid Orthodontic Wire Generator v2.0")

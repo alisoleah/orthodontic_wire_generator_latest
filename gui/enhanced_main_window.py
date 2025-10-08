@@ -32,7 +32,7 @@ except ImportError:
 from core.workflow_manager import WorkflowManager, WorkflowMode
 from gui.enhanced_control_panel import EnhancedControlPanel
 from visualization.dual_arch_visualizer import DualArchVisualizer
-from gui.status_panel import StatusPanel
+from gui.enhanced_status_panel import EnhancedStatusPanel
 
 
 class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
@@ -388,23 +388,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
     def on_point_added(self, point: np.ndarray, point_type: str):
         """Handle point addition in visualizer and update workflow manager."""
         try:
-            if point_type == 'plane':
-                if len(self.workflow_manager.occlusal_plane_points) < 3:
-                    self.workflow_manager.occlusal_plane_points.append(point)
-                    count = len(self.workflow_manager.occlusal_plane_points)
-                    self.update_status(f"Occlusal plane point {count}/3 added")
-
-                    # Update the control panel button text
-                    if hasattr(self.control_panel, 'start_plane_btn'):
-                        self.control_panel.start_plane_btn.setText(f"Placing Points... ({count}/3)")
-
-                    if count == 3:
-                        self.workflow_manager.set_occlusal_plane_points(self.workflow_manager.occlusal_plane_points)
-                        self.update_status("Occlusal plane defined. You can now place control points.")
-                        if hasattr(self.control_panel, 'start_points_btn'):
-                            self.control_panel.start_points_btn.setEnabled(True)  # Enable next step
-
-            elif point_type == 'control':
+            if point_type == 'control':
                 active_arch = self.workflow_manager.get_active_arch()
                 self.workflow_manager.add_control_point(point, active_arch)
 
@@ -413,10 +397,10 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
                     count = len(arch_data['control_points'])
                     self.update_status(f"Control point {count} added")
 
-                    # Update control panel button text
-                    if hasattr(self.control_panel, 'start_points_btn'):
-                        self.control_panel.start_points_btn.setText(f"Placing Points ({count})")
-                    if hasattr(self.control_panel, 'generate_wire_btn') and count >= 2:
+                    # Update control panel button text for the 3-point manual workflow
+                    if hasattr(self.control_panel, 'define_path_btn'):
+                        self.control_panel.define_path_btn.setText(f"Define Wire Path ({count}/3)")
+                    if hasattr(self.control_panel, 'generate_wire_btn') and count >= 3:
                         self.control_panel.generate_wire_btn.setEnabled(True)
 
         except Exception as e:
@@ -485,7 +469,6 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         if reply == QMessageBox.Yes:
             self.workflow_manager.reset_workflow()
             self.visualizer.clear_control_points()
-            self.visualizer.clear_plane()
             self.status_panel.reset_display()
             self.update_status("New project created")
     
@@ -666,139 +649,6 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         """Initialize fallback UI for systems without PyQt5"""
         print("Enhanced Main Window - Fallback Mode")
         print("PyQt5 not available. Please install PyQt5 for full functionality.")
-
-
-class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
-    """Enhanced status panel with comprehensive information display and code viewer."""
-    
-    def __init__(self, parent=None):
-        if PYQT5_AVAILABLE:
-            super().__init__(parent)
-            self.init_ui()
-    
-    def init_ui(self):
-        """Initialize status panel UI"""
-        from PyQt5.QtWidgets import QTextEdit, QGroupBox, QFrame
-        layout = QVBoxLayout()
-        
-        # Title
-        title = QLabel("Status & Information")
-        title.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
-        layout.addWidget(title)
-        
-        # Workflow status
-        workflow_group = QFrame()
-        workflow_group.setFrameStyle(QFrame.StyledPanel)
-        workflow_layout = QVBoxLayout()
-        
-        self.mode_status = QLabel("Mode: Automatic")
-        self.active_arch_status = QLabel("Active Arch: Upper")
-        self.arches_loaded_status = QLabel("Arches Loaded: 0/2")
-        
-        workflow_layout.addWidget(self.mode_status)
-        workflow_layout.addWidget(self.active_arch_status)
-        workflow_layout.addWidget(self.arches_loaded_status)
-        
-        workflow_group.setLayout(workflow_layout)
-        layout.addWidget(workflow_group)
-        
-        # Wire information
-        wire_group = QFrame()
-        wire_group.setFrameStyle(QFrame.StyledPanel)
-        wire_layout = QVBoxLayout()
-        
-        wire_title = QLabel("Wire Information")
-        wire_title.setStyleSheet("font-weight: bold;")
-        wire_layout.addWidget(wire_title)
-        
-        self.wire_length_status = QLabel("Length: Not calculated")
-        self.control_points_status = QLabel("Control Points: 0")
-        self.height_offset_status = QLabel("Height Offset: 0.0 mm")
-        
-        wire_layout.addWidget(self.wire_length_status)
-        wire_layout.addWidget(self.control_points_status)
-        wire_layout.addWidget(self.height_offset_status)
-        
-        wire_group.setLayout(wire_layout)
-        layout.addWidget(wire_group)
-        
-        # Exported Code Viewer
-        export_group = QGroupBox("Exported Code Viewer")
-        export_layout = QVBoxLayout()
-        self.code_viewer = QTextEdit()
-        self.code_viewer.setReadOnly(True)
-        self.code_viewer.setFontFamily("Courier")
-        self.code_viewer.setLineWrapMode(QTextEdit.NoWrap)
-        export_layout.addWidget(self.code_viewer)
-        export_group.setLayout(export_layout)
-        layout.addWidget(export_group)
-
-        # Add stretch to push content to top
-        layout.addStretch()
-        
-        self.setLayout(layout)
-    
-    def update_workflow_mode(self, mode: str):
-        """Update workflow mode display"""
-        if PYQT5_AVAILABLE:
-            self.mode_status.setText(f"Mode: {mode.capitalize()}")
-    
-    def update_active_arch(self, arch_type: str):
-        """Update active arch display"""
-        if PYQT5_AVAILABLE:
-            self.active_arch_status.setText(f"Active Arch: {arch_type.capitalize()}")
-    
-    def update_arch_info(self, arch_type: str, file_path: str):
-        """Update arch loading information"""
-        # This would update the arches loaded count
-        pass
-    
-    def update_wire_info(self, wire_path):
-        """Update wire information"""
-        if PYQT5_AVAILABLE and wire_path is not None:
-            # Calculate wire length
-            length = self.calculate_wire_length(wire_path)
-            self.wire_length_status.setText(f"Length: {length:.2f} mm")
-    
-    def update_workflow_status(self, status: Dict[str, Any]):
-        """Update comprehensive workflow status"""
-        if PYQT5_AVAILABLE:
-            # Update arches loaded count
-            upper_loaded = 1 if status.get('upper_loaded', False) else 0
-            lower_loaded = 1 if status.get('lower_loaded', False) else 0
-            total_loaded = upper_loaded + lower_loaded
-            self.arches_loaded_status.setText(f"Arches Loaded: {total_loaded}/2")
-            
-            # Update height offset
-            height_offset = status.get('height_offset', 0.0)
-            self.height_offset_status.setText(f"Height Offset: {height_offset:.1f} mm")
-    
-    def calculate_wire_length(self, wire_path) -> float:
-        """Calculate total wire length"""
-        if len(wire_path) < 2:
-            return 0.0
-        
-        total_length = 0.0
-        for i in range(1, len(wire_path)):
-            segment_length = np.linalg.norm(wire_path[i] - wire_path[i-1])
-            total_length += segment_length
-        
-        return total_length
-    
-    def reset_display(self):
-        """Reset all status displays"""
-        if PYQT5_AVAILABLE:
-            self.wire_length_status.setText("Length: Not calculated")
-            self.control_points_status.setText("Control Points: 0")
-            self.height_offset_status.setText("Height Offset: 0.0 mm")
-            self.arches_loaded_status.setText("Arches Loaded: 0/2")
-            if hasattr(self, 'code_viewer'):
-                self.code_viewer.clear()
-
-    def display_exported_code(self, code: str):
-        """Display the given code in the code viewer text edit."""
-        if PYQT5_AVAILABLE and hasattr(self, 'code_viewer'):
-            self.code_viewer.setText(code)
 
 
 # Main application entry point
