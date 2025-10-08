@@ -189,12 +189,11 @@ class WorkflowManager:
         
         # Step 2: Position brackets
         print(f"Positioning brackets...")
-        # ✅ FIX: Use correct method name and parameters
         bracket_positions = self.bracket_positioner.calculate_positions(
-            detected_teeth,        # First parameter: teeth list
-            mesh,                  # Second parameter: mesh
-            arch_data['arch_center'],  # Third parameter: arch_center (was missing!)
-            arch_type              # Fourth parameter: arch_type
+            detected_teeth,
+            mesh,
+            arch_data['arch_center'],
+            arch_type
         )
         arch_data['bracket_positions'] = bracket_positions
         print(f"Positioned {len(bracket_positions)} brackets ({sum(1 for b in bracket_positions if b.get('visible', True))} visible)")
@@ -208,26 +207,21 @@ class WorkflowManager:
     
     def generate_wire_from_brackets(self, arch_type: str = None) -> np.ndarray:
         """
-        ✅ FIXED METHOD: Generate wire path from bracket positions.
-        This is used for:
-        - Automatic mode wire generation
-        - Height adjustment in automatic mode
-        - Manual mode wire between 3 points (using detected brackets)
-        
-        Args:
-            arch_type: 'upper' or 'lower', defaults to active arch
-            
-        Returns:
-            Wire path as numpy array of 3D points
+        ✅ FIXED: Generate wire path from bracket positions.
+        Now includes arch_center parameter and correct return value handling.
         """
         if arch_type is None:
             arch_type = self.active_arch
         
         arch_data = self.arch_data[arch_type]
         bracket_positions = arch_data.get('bracket_positions', [])
+        arch_center = arch_data.get('arch_center')
         
         if not bracket_positions:
             raise ValueError(f"No bracket positions found for {arch_type} arch")
+        
+        if arch_center is None:
+            raise ValueError(f"No arch center found for {arch_type} arch")
         
         # Get visible brackets only
         visible_brackets = [b for b in bracket_positions if b.get('visible', True)]
@@ -255,14 +249,11 @@ class WorkflowManager:
                 'vertical_offset': self.global_height_offset
             })
         
-        # ✅ FIX: Remove samples_per_segment parameter
-        wire_path, is_valid = self.wire_path_creator.create_smooth_path(
-            control_points
-            # Removed: samples_per_segment=50
+        # ✅ FIXED: Handle single return value
+        wire_path = self.wire_path_creator.create_smooth_path(
+            control_points,
+            arch_center
         )
-        
-        if not is_valid:
-            print("Warning: Generated wire path may have issues")
         
         return wire_path
     
@@ -351,13 +342,18 @@ class WorkflowManager:
     def _generate_wire_following_teeth(self, manual_points: List[Dict], 
                                    bracket_positions: List[Dict]) -> np.ndarray:
         """
-        ✅ FIXED METHOD: Generate wire that follows teeth between manually selected points.
-        
-        Strategy:
-        1. Find which brackets are between the 3 selected points
-        2. Use those bracket positions as intermediate control points
-        3. Generate smooth spline through: Point1 → Brackets → Point2 → Brackets → Point3
+        ✅ FIXED: Generate wire that follows teeth between manually selected points.
+        Now includes arch_center parameter and correct return value handling.
         """
+        # Get arch center
+        arch_type = self.active_arch
+        arch_data = self.arch_data[arch_type]
+        arch_center = arch_data.get('arch_center')
+        
+        if arch_center is None:
+            print("Warning: No arch center found, falling back to simple spline")
+            return self._generate_simple_spline(manual_points)
+        
         # Extract positions from manual points
         p1 = manual_points[0]['position']
         p2 = manual_points[1]['position']
@@ -454,27 +450,34 @@ class WorkflowManager:
             'vertical_offset': self.global_height_offset
         })
         
-        # ✅ FIX: Remove samples_per_segment parameter
-        wire_path, is_valid = self.wire_path_creator.create_smooth_path(
-            all_control_points
-            # Removed: samples_per_segment=30
+        # ✅ FIXED: Handle single return value
+        wire_path = self.wire_path_creator.create_smooth_path(
+            all_control_points,
+            arch_center
         )
-        
-        if not is_valid:
-            print("Warning: Wire path may have issues, falling back to simple spline")
-            return self._generate_simple_spline(manual_points)
         
         return wire_path
     
     def _generate_simple_spline(self, manual_points: List[Dict]) -> np.ndarray:
         """
-        ✅ NEW METHOD: Generate simple spline through manual points (fallback).
-        Used when bracket positions are not available.
+        ✅ FIXED: Generate simple spline through manual points (fallback).
+        Now includes arch_center parameter and correct return value handling.
         """
-        # Generate smooth spline through the manual points
-        wire_path, is_valid = self.wire_path_creator.create_smooth_path(
+        # Get arch center
+        arch_type = self.active_arch
+        arch_data = self.arch_data[arch_type]
+        arch_center = arch_data.get('arch_center')
+        
+        if arch_center is None:
+            # Fallback: calculate center from manual points
+            positions = [mp['position'] for mp in manual_points]
+            arch_center = np.mean(positions, axis=0)
+            print(f"Warning: Using calculated center from manual points: {arch_center}")
+        
+        # ✅ FIXED: Handle single return value
+        wire_path = self.wire_path_creator.create_smooth_path(
             manual_points,
-            # samples_per_segment=50
+            arch_center
         )
         
         return wire_path
@@ -668,4 +671,4 @@ class WorkflowManager:
         }
         self.opposing_arch_mesh = None
         self.global_height_offset = 0.0
-        print("Workflow reset") 
+        print("Workflow reset")
