@@ -1,41 +1,23 @@
 """
 Workflow Manager for Hybrid Automatic/Manual Orthodontic Wire Generator
 
-This module manages different workflow modes and transitions between them:
-- Automatic Detection: Quick wire generation using existing algorithms
-- Manual Design: Full FixR-style control point placement
-- Hybrid: Start with automatic, then manually refine
-
-Plus: Dual-arch support for loading both upper and lower jaws simultaneously.
+Manages the workflow state and coordinates between different components.
+Supports three modes: Automatic, Manual, and Hybrid.
 """
 
-from enum import Enum
 import numpy as np
-from typing import Optional, Dict, List, Tuple, Any
+from enum import Enum
+from typing import Optional, List, Dict, Any, Tuple
+import open3d as o3d
 
-try:
-    from .mesh_processor import MeshProcessor
-    from .tooth_detector import ToothDetector
-    from .bracket_positioner import BracketPositioner
-    from ..wire.wire_path_creator import WirePathCreator
-    from ..wire.wire_path_creator_enhanced import WirePathCreatorEnhanced
-    from ..export.gcode_generator import GCodeGenerator
-    from ..export.esp32_generator import ESP32Generator
-    from ..export.stl_exporter import STLExporter
-except ImportError:
-    # Fallback to absolute imports when run as top-level script
-    from core.mesh_processor import MeshProcessor
-    from core.tooth_detector import ToothDetector
-    from core.bracket_positioner import BracketPositioner
-    from wire.wire_path_creator import WirePathCreator
-    from wire.wire_path_creator_enhanced import WirePathCreatorEnhanced
-    from export.gcode_generator import GCodeGenerator
-    from export.esp32_generator import ESP32Generator
-    from export.stl_exporter import STLExporter
+from core.mesh_processor import MeshProcessor
+from core.tooth_detector import ToothDetector
+from core.bracket_positioner import BracketPositioner
+from wire.wire_path_creator import WirePathCreator
 
 
 class WorkflowMode(Enum):
-    """Enumeration of available workflow modes"""
+    """Workflow modes for wire generation"""
     AUTOMATIC = "automatic"
     MANUAL = "manual"
     HYBRID = "hybrid"
@@ -43,162 +25,146 @@ class WorkflowMode(Enum):
 
 class WorkflowManager:
     """
-    Manages different workflow modes and transitions between them
+    Manages the workflow for orthodontic wire generation.
+    Coordinates between automatic detection, manual design, and hybrid approaches.
     """
     
     def __init__(self):
-        self.current_mode = WorkflowMode.AUTOMATIC
-        self.upper_arch_data = None
-        self.lower_arch_data = None
-        self.opposing_arch_data = None
-        self.active_arch = 'upper'
-        self.global_height_offset = 0.0
-        
-        # Initialize processors
+        """Initialize the workflow manager"""
+        # Core components
         self.mesh_processor = MeshProcessor()
         self.tooth_detector = ToothDetector()
         self.bracket_positioner = BracketPositioner()
         self.wire_path_creator = WirePathCreator()
-        self.wire_path_creator_enhanced = WirePathCreatorEnhanced()
         
-        # Initialize exporters
-        self.gcode_generator = GCodeGenerator()
-        self.esp32_generator = ESP32Generator()
-        self.stl_exporter = STLExporter()
+        # State management
+        self.current_mode = WorkflowMode.AUTOMATIC
+        self.active_arch = 'upper'
+        self.global_height_offset = 0.0
         
-        
-    def set_mode(self, mode: WorkflowMode):
-        """Switch between workflow modes"""
-        self.current_mode = mode
-        self.notify_mode_change()
-    
-    def notify_mode_change(self):
-        """Notify observers of mode change"""
-        # This can be extended to emit signals or call callbacks
-        print(f"Workflow mode changed to: {self.current_mode.value}")
-    
-    def is_dual_arch_loaded(self):
-        """Check if both arches are loaded"""
-        return self.upper_arch_data is not None and self.lower_arch_data is not None
-    
-    def has_opposing_arch(self):
-        """Check if opposing arch is loaded for collision detection"""
-        return self.opposing_arch_data is not None
-    
-    def load_arch(self, stl_path: str, arch_type: str = 'upper') -> Dict[str, Any]:
-        """
-        Load STL file for upper or lower arch
-        
-        Args:
-            stl_path: Path to STL file
-            arch_type: 'upper' or 'lower'
-            
-        Returns:
-            Dictionary containing mesh data and metadata
-        """
-        try:
-            # Load the mesh
-            mesh_data = self.mesh_processor.load_mesh(stl_path)
-
-            if mesh_data is None:
-                print(f"Error: Failed to load mesh from {stl_path}")
-                return None
-
-            # Clean the mesh
-            mesh_data = self.mesh_processor.clean_mesh(mesh_data)
-
-            arch_data = {
-                'mesh': mesh_data,
-                'stl_path': stl_path,
+        # Data storage for both arches
+        self.arch_data = {
+            'upper': {
+                'mesh': None,
+                'file_path': None,
+                'teeth_detected': [],
+                'bracket_positions': [],
                 'control_points': [],
                 'wire_path': None,
-                'teeth_detected': None,
-                'bracket_positions': None,
-                'last_modified': None
+                'arch_center': None
+            },
+            'lower': {
+                'mesh': None,
+                'file_path': None,
+                'teeth_detected': [],
+                'bracket_positions': [],
+                'control_points': [],
+                'wire_path': None,
+                'arch_center': None
             }
-
-            if arch_type == 'upper':
-                self.upper_arch_data = arch_data
-            else:
-                self.lower_arch_data = arch_data
-
-            print(f"Successfully loaded {arch_type} arch: {len(mesh_data.vertices)} vertices")
-            return mesh_data
-
-        except Exception as e:
-            print(f"Error loading arch {arch_type}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def load_opposing_arch(self, stl_path: str) -> Dict[str, Any]:
-        """
-        Load opposing arch for collision detection
-
-        Args:
-            stl_path: Path to opposing arch STL file
-
-        Returns:
-            Dictionary containing opposing arch mesh data
-        """
-        try:
-            # Load the mesh
-            mesh_data = self.mesh_processor.load_mesh(stl_path)
-
-            if mesh_data is None:
-                print(f"Error: Failed to load opposing arch from {stl_path}")
-                return None
-
-            # Clean the mesh
-            mesh_data = self.mesh_processor.clean_mesh(mesh_data)
-
-            self.opposing_arch_data = {
-                'mesh': mesh_data,
-                'stl_path': stl_path
-            }
-
-            print(f"Successfully loaded opposing arch: {len(mesh_data.vertices)} vertices")
-            return mesh_data
-
-        except Exception as e:
-            print(f"Error loading opposing arch: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def get_arch_data(self, arch_type: str) -> Optional[Dict[str, Any]]:
-        """Get arch data for specified arch type"""
-        if arch_type == 'upper':
-            return self.upper_arch_data
-        elif arch_type == 'lower':
-            return self.lower_arch_data
-        else:
-            return None
-    
-    def set_active_arch(self, arch_type: str):
-        """Set which arch is currently being designed"""
-        if arch_type in ['upper', 'lower']:
-            self.active_arch = arch_type
-    
-    def get_active_arch(self) -> str:
-        """Get currently active arch"""
-        return self.active_arch
-    
-    def get_active_arch_data(self) -> Optional[Dict[str, Any]]:
-        """Get data for currently active arch"""
-        return self.get_arch_data(self.active_arch)
-    
-    def set_global_height(self, height_mm: float):
-        """Set global height offset for wire"""
-        self.global_height_offset = height_mm
+        }
+        
+        # Opposing arch for collision detection
+        self.opposing_arch_mesh = None
     
     # ============================================
-    # AUTOMATIC MODE FUNCTIONS
+    # MODE AND STATE MANAGEMENT
+    # ============================================
+    
+    def set_mode(self, mode: WorkflowMode):
+        """Set the current workflow mode"""
+        self.current_mode = mode
+        print(f"Workflow mode changed to: {mode.value}")
+    
+    def set_active_arch(self, arch_type: str):
+        """Set which arch is currently active for editing"""
+        if arch_type in ['upper', 'lower']:
+            self.active_arch = arch_type
+            print(f"Active arch set to: {arch_type}")
+    
+    def get_active_arch(self) -> str:
+        """Get the currently active arch"""
+        return self.active_arch
+    
+    def get_arch_data(self, arch_type: str) -> Optional[Dict]:
+        """Get data for a specific arch"""
+        if arch_type in self.arch_data:
+            return self.arch_data[arch_type]
+        return None
+    
+    def get_active_arch_data(self) -> Optional[Dict]:
+        """Get data for the currently active arch"""
+        return self.arch_data[self.active_arch]
+    
+    def set_global_height(self, height_offset: float):
+        """Set global height offset for wire"""
+        self.global_height_offset = height_offset
+        print(f"Global height offset set to: {height_offset:.2f}mm")
+    
+    # ============================================
+    # MESH LOADING
+    # ============================================
+    
+    def load_arch(self, file_path: str, arch_type: str):
+        """
+        Load a dental arch STL file.
+        
+        Args:
+            file_path: Path to STL file
+            arch_type: 'upper' or 'lower'
+        """
+        if arch_type not in ['upper', 'lower']:
+            raise ValueError(f"Invalid arch type: {arch_type}")
+        
+        # Load and process mesh
+        mesh = o3d.io.read_triangle_mesh(file_path)
+        
+        if not mesh.has_vertices():
+            raise ValueError(f"Failed to load mesh from {file_path}")
+        
+        print(f"Loaded STL: {len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles")
+        
+        # Clean and process mesh
+        mesh = self.mesh_processor.clean_mesh(mesh)
+        mesh.compute_vertex_normals()
+        
+        print(f"Mesh cleaned: {len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles")
+        
+        # Store mesh data
+        self.arch_data[arch_type]['mesh'] = mesh
+        self.arch_data[arch_type]['file_path'] = file_path
+        
+        # Calculate arch center for reference
+        vertices = np.asarray(mesh.vertices)
+        arch_center = np.mean(vertices, axis=0)
+        self.arch_data[arch_type]['arch_center'] = arch_center
+        
+        print(f"Successfully loaded {arch_type} arch: {len(mesh.vertices)} vertices")
+    
+    def load_opposing_arch(self, file_path: str):
+        """Load opposing arch for collision detection"""
+        mesh = o3d.io.read_triangle_mesh(file_path)
+        
+        if not mesh.has_vertices():
+            raise ValueError(f"Failed to load opposing arch from {file_path}")
+        
+        mesh = self.mesh_processor.clean_mesh(mesh)
+        mesh.compute_vertex_normals()
+        
+        self.opposing_arch_mesh = mesh
+        print(f"Loaded opposing arch: {len(mesh.vertices)} vertices")
+    
+    def has_opposing_arch(self) -> bool:
+        """Check if opposing arch is loaded"""
+        return self.opposing_arch_mesh is not None
+    
+    # ============================================
+    # AUTOMATIC WORKFLOW
     # ============================================
     
     def run_automatic_detection(self, arch_type: str = None) -> Tuple[List, List, np.ndarray]:
         """
-        Run automatic tooth detection and wire generation
+        Run automatic tooth detection and wire generation.
         
         Args:
             arch_type: 'upper' or 'lower', defaults to active arch
@@ -209,71 +175,100 @@ class WorkflowManager:
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None:
-            raise ValueError(f"No {arch_type} arch loaded")
-
+        arch_data = self.arch_data[arch_type]
+        mesh = arch_data['mesh']
+        
+        if mesh is None:
+            raise ValueError(f"No mesh loaded for {arch_type} arch")
+        
         # Step 1: Detect teeth
-        detected_teeth = self.tooth_detector.detect_teeth(arch_data['mesh'], arch_type)
+        print(f"Detecting teeth for {arch_type} arch...")
+        detected_teeth = self.tooth_detector.detect_teeth(mesh, arch_type)
         arch_data['teeth_detected'] = detected_teeth
-
-        # Get arch center for bracket positioning
-        arch_center = arch_data['mesh'].get_center()
-
+        print(f"Detected {len(detected_teeth)} teeth using angular segmentation")
+        
         # Step 2: Position brackets
-        bracket_positions = self.bracket_positioner.calculate_positions(
-            detected_teeth,
-            arch_data['mesh'],
-            arch_center,
-            arch_type
+        print(f"Positioning brackets...")
+        bracket_positions = self.bracket_positioner.position_brackets(
+            mesh, detected_teeth, arch_type
         )
         arch_data['bracket_positions'] = bracket_positions
+        print(f"Positioned {len(bracket_positions)} brackets ({sum(1 for b in bracket_positions if b.get('visible', True))} visible)")
         
         # Step 3: Generate wire path
-        wire_path = self.wire_path_creator_enhanced.create_smooth_path(
-            bracket_positions,
-            arch_center,
-            height_offset=self.global_height_offset
-        )
+        print(f"Generating wire path...")
+        wire_path = self.generate_wire_from_brackets(arch_type)
         arch_data['wire_path'] = wire_path
         
         return detected_teeth, bracket_positions, wire_path
     
-    def extract_control_points_from_auto(self, arch_type: str = None) -> List[np.ndarray]:
+    def generate_wire_from_brackets(self, arch_type: str = None) -> np.ndarray:
         """
-        Extract control points from automatic wire for manual editing
+        ✅ NEW METHOD: Generate wire path from bracket positions.
+        This is used for:
+        - Automatic mode wire generation
+        - Height adjustment in automatic mode
+        - Manual mode wire between 3 points (using detected brackets)
         
         Args:
             arch_type: 'upper' or 'lower', defaults to active arch
             
         Returns:
-            List of control points
+            Wire path as numpy array of 3D points
         """
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None or arch_data['bracket_positions'] is None:
-            raise ValueError(f"No automatic wire generated for {arch_type} arch")
+        arch_data = self.arch_data[arch_type]
+        bracket_positions = arch_data.get('bracket_positions', [])
         
-        # Convert bracket positions to control points
+        if not bracket_positions:
+            raise ValueError(f"No bracket positions found for {arch_type} arch")
+        
+        # Get visible brackets only
+        visible_brackets = [b for b in bracket_positions if b.get('visible', True)]
+        
+        if len(visible_brackets) < 2:
+            raise ValueError(f"Need at least 2 visible brackets, found {len(visible_brackets)}")
+        
+        # Extract control points from bracket positions
         control_points = []
-        for bracket_pos in arch_data['bracket_positions']:
-            # Add height offset
-            control_point = bracket_pos.copy()
-            control_point[2] += self.global_height_offset  # Assuming Z is up
-            control_points.append(control_point)
+        for bracket in visible_brackets:
+            # Use the current position (with height offset applied)
+            pos = bracket['position'].copy()
+            
+            # Apply global height offset
+            if self.global_height_offset != 0.0:
+                normal = bracket['normal']
+                pos = pos + normal * self.global_height_offset
+            
+            control_points.append({
+                'position': pos,
+                'original_position': bracket['original_position'].copy(),
+                'type': 'bracket',
+                'index': bracket['tooth_index'],
+                'bend_angle': 0.0,
+                'vertical_offset': self.global_height_offset
+            })
         
-        arch_data['control_points'] = control_points
-        return control_points
+        # Generate smooth wire path through control points
+        wire_path, is_valid = self.wire_path_creator.create_smooth_path(
+            control_points,
+            samples_per_segment=50
+        )
+        
+        if not is_valid:
+            print("Warning: Generated wire path may have issues")
+        
+        return wire_path
     
     # ============================================
-    # MANUAL MODE FUNCTIONS
+    # MANUAL WORKFLOW
     # ============================================
     
     def add_control_point(self, point: np.ndarray, arch_type: str = None):
         """
-        Add a control point for manual wire design
+        Add a manually selected control point.
         
         Args:
             point: 3D point coordinates
@@ -282,87 +277,253 @@ class WorkflowManager:
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None:
-            raise ValueError(f"No {arch_type} arch loaded")
+        arch_data = self.arch_data[arch_type]
         
-        # Add height offset
-        adjusted_point = point.copy()
-        adjusted_point[2] += self.global_height_offset
+        control_point = {
+            'position': point.copy(),
+            'original_position': point.copy(),
+            'type': 'manual',
+            'index': len(arch_data['control_points']),
+            'bend_angle': 0.0,
+            'vertical_offset': 0.0
+        }
         
-        arch_data['control_points'].append(adjusted_point)
-    
-    def remove_last_control_point(self, arch_type: str = None):
-        """Remove the last placed control point"""
-        if arch_type is None:
-            arch_type = self.active_arch
-        
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is not None and len(arch_data['control_points']) > 0:
-            arch_data['control_points'].pop()
-    
-    def clear_control_points(self, arch_type: str = None):
-        """Clear all control points"""
-        if arch_type is None:
-            arch_type = self.active_arch
-        
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is not None:
-            arch_data['control_points'] = []
+        arch_data['control_points'].append(control_point)
+        print(f"Added control point {len(arch_data['control_points'])} for {arch_type} arch")
     
     def update_control_point(self, index: int, new_position: np.ndarray, arch_type: str = None):
-        """
-        Update position of a specific control point
-        
-        Args:
-            index: Index of control point to update
-            new_position: New 3D position
-            arch_type: 'upper' or 'lower', defaults to active arch
-        """
+        """Update position of a control point"""
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None:
-            raise ValueError(f"No {arch_type} arch loaded")
+        arch_data = self.arch_data[arch_type]
+        control_points = arch_data['control_points']
         
-        if 0 <= index < len(arch_data['control_points']):
-            # Apply height offset
-            adjusted_position = new_position.copy()
-            adjusted_position[2] += self.global_height_offset
-            arch_data['control_points'][index] = adjusted_position
+        if 0 <= index < len(control_points):
+            control_points[index]['position'] = new_position.copy()
+            print(f"Updated control point {index + 1} for {arch_type} arch")
+    
+    def clear_control_points(self, arch_type: str = None):
+        """Clear all manually placed control points"""
+        if arch_type is None:
+            arch_type = self.active_arch
+        
+        self.arch_data[arch_type]['control_points'] = []
+        print(f"Cleared control points for {arch_type} arch")
     
     def generate_wire_from_control_points(self, arch_type: str = None) -> np.ndarray:
         """
-        Generate wire path from manually placed control points
+        ✅ UPDATED METHOD: Generate wire from manually placed control points.
+        Now uses bracket positions to follow teeth between the 3 points.
         
         Args:
             arch_type: 'upper' or 'lower', defaults to active arch
             
         Returns:
-            Wire path as numpy array
+            Wire path as numpy array of 3D points
         """
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None or len(arch_data['control_points']) < 2:
-            raise ValueError(f"Need at least 2 control points for {arch_type} arch")
+        arch_data = self.arch_data[arch_type]
+        manual_points = arch_data.get('control_points', [])
         
-        # Get arch center for wire generation
-        if arch_data.get('mesh') is None:
-            raise ValueError(f"Mesh not loaded for {arch_type} arch.")
-        arch_center = arch_data['mesh'].get_center()
-
-        # Generate smooth wire path through control points
-        wire_path = self.wire_path_creator_enhanced.create_smooth_path(
-            arch_data['control_points'],
-            arch_center,
-            height_offset=0.0  # Height already applied to control points
-        )
+        if len(manual_points) < 3:
+            raise ValueError(f"Need at least 3 control points, have {len(manual_points)}")
+        
+        # ✅ FIX: Use bracket positions if available (follows teeth)
+        bracket_positions = arch_data.get('bracket_positions', [])
+        
+        if bracket_positions and len(bracket_positions) > 0:
+            # Wire follows teeth using bracket positions
+            wire_path = self._generate_wire_following_teeth(manual_points, bracket_positions)
+        else:
+            # Fallback: Simple spline through the 3 points
+            wire_path = self._generate_simple_spline(manual_points)
         
         arch_data['wire_path'] = wire_path
         return wire_path
+    
+    def _generate_wire_following_teeth(self, manual_points: List[Dict], 
+                                       bracket_positions: List[Dict]) -> np.ndarray:
+        """
+        ✅ NEW METHOD: Generate wire that follows teeth between manually selected points.
+        
+        Strategy:
+        1. Find which brackets are between the 3 selected points
+        2. Use those bracket positions as intermediate control points
+        3. Generate smooth spline through: Point1 → Brackets → Point2 → Brackets → Point3
+        """
+        # Extract positions from manual points
+        p1 = manual_points[0]['position']
+        p2 = manual_points[1]['position']
+        p3 = manual_points[2]['position']
+        
+        # Get visible brackets
+        visible_brackets = [b for b in bracket_positions if b.get('visible', True)]
+        
+        if len(visible_brackets) < 2:
+            # Not enough brackets, fall back to simple spline
+            return self._generate_simple_spline(manual_points)
+        
+        # Sort brackets by position along the arch
+        # Use the first manual point as reference
+        bracket_distances = []
+        for bracket in visible_brackets:
+            dist = np.linalg.norm(bracket['position'] - p1)
+            bracket_distances.append((dist, bracket))
+        
+        bracket_distances.sort(key=lambda x: x[0])
+        sorted_brackets = [b[1] for b in bracket_distances]
+        
+        # Find brackets between p1 and p3
+        # Simple approach: use all brackets that are within the bounding box
+        min_coords = np.minimum(np.minimum(p1, p2), p3)
+        max_coords = np.maximum(np.maximum(p1, p2), p3)
+        
+        relevant_brackets = []
+        for bracket in sorted_brackets:
+            pos = bracket['position']
+            if np.all(pos >= min_coords - 5) and np.all(pos <= max_coords + 5):
+                relevant_brackets.append(bracket)
+        
+        # Build control points: manual points + relevant brackets
+        all_control_points = []
+        
+        # Add first manual point
+        all_control_points.append({
+            'position': p1.copy(),
+            'original_position': p1.copy(),
+            'type': 'manual',
+            'index': 0,
+            'bend_angle': 0.0,
+            'vertical_offset': self.global_height_offset
+        })
+        
+        # Add brackets between p1 and p2
+        for bracket in relevant_brackets[:len(relevant_brackets)//2]:
+            pos = bracket['position'].copy()
+            if self.global_height_offset != 0.0:
+                pos = pos + bracket['normal'] * self.global_height_offset
+            
+            all_control_points.append({
+                'position': pos,
+                'original_position': bracket['original_position'].copy(),
+                'type': 'bracket',
+                'index': bracket['tooth_index'],
+                'bend_angle': 0.0,
+                'vertical_offset': self.global_height_offset
+            })
+        
+        # Add second manual point
+        all_control_points.append({
+            'position': p2.copy(),
+            'original_position': p2.copy(),
+            'type': 'manual',
+            'index': 1,
+            'bend_angle': 0.0,
+            'vertical_offset': self.global_height_offset
+        })
+        
+        # Add brackets between p2 and p3
+        for bracket in relevant_brackets[len(relevant_brackets)//2:]:
+            pos = bracket['position'].copy()
+            if self.global_height_offset != 0.0:
+                pos = pos + bracket['normal'] * self.global_height_offset
+            
+            all_control_points.append({
+                'position': pos,
+                'original_position': bracket['original_position'].copy(),
+                'type': 'bracket',
+                'index': bracket['tooth_index'],
+                'bend_angle': 0.0,
+                'vertical_offset': self.global_height_offset
+            })
+        
+        # Add third manual point
+        all_control_points.append({
+            'position': p3.copy(),
+            'original_position': p3.copy(),
+            'type': 'manual',
+            'index': 2,
+            'bend_angle': 0.0,
+            'vertical_offset': self.global_height_offset
+        })
+        
+        # Generate smooth wire path
+        wire_path, is_valid = self.wire_path_creator.create_smooth_path(
+            all_control_points,
+            samples_per_segment=30
+        )
+        
+        if not is_valid:
+            print("Warning: Wire path may have issues, falling back to simple spline")
+            return self._generate_simple_spline(manual_points)
+        
+        return wire_path
+    
+    def _generate_simple_spline(self, manual_points: List[Dict]) -> np.ndarray:
+        """
+        ✅ NEW METHOD: Generate simple spline through manual points (fallback).
+        Used when bracket positions are not available.
+        """
+        # Generate smooth spline through the manual points
+        wire_path, is_valid = self.wire_path_creator.create_smooth_path(
+            manual_points,
+            samples_per_segment=50
+        )
+        
+        return wire_path
+    
+    # ============================================
+    # HYBRID WORKFLOW
+    # ============================================
+    
+    def extract_control_points_from_auto(self, arch_type: str = None) -> List[np.ndarray]:
+        """
+        Extract control points from automatically generated wire path.
+        Used for hybrid workflow to convert automatic wire to manual editing.
+        
+        Args:
+            arch_type: 'upper' or 'lower', defaults to active arch
+            
+        Returns:
+            List of 3D points as numpy arrays
+        """
+        if arch_type is None:
+            arch_type = self.active_arch
+        
+        arch_data = self.arch_data[arch_type]
+        
+        if not arch_data:
+            raise ValueError(f"{arch_type} arch not loaded")
+        
+        wire_path = arch_data.get('wire_path')
+        
+        if wire_path is None or len(wire_path) == 0:
+            raise ValueError(f"No wire path found for {arch_type} arch")
+        
+        # Extract evenly spaced points from wire path
+        # Use 10-15 control points for good editability
+        num_control_points = min(15, max(5, len(wire_path) // 20))
+        
+        indices = np.linspace(0, len(wire_path) - 1, num_control_points, dtype=int)
+        control_points = [wire_path[i] for i in indices]
+        
+        # Store these as control points in the arch data
+        arch_data['control_points'] = [
+            {
+                'position': pt.copy(),
+                'original_position': pt.copy(),
+                'type': 'converted',
+                'index': i,
+                'bend_angle': 0.0,
+                'vertical_offset': 0.0
+            }
+            for i, pt in enumerate(control_points)
+        ]
+        
+        return control_points
     
     # ============================================
     # COLLISION DETECTION
@@ -370,7 +531,7 @@ class WorkflowManager:
     
     def detect_collisions(self, arch_type: str = None) -> List[np.ndarray]:
         """
-        Detect collisions between wire and opposing arch
+        Detect collisions between wire and opposing arch.
         
         Args:
             arch_type: 'upper' or 'lower', defaults to active arch
@@ -381,82 +542,126 @@ class WorkflowManager:
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None or arch_data['wire_path'] is None:
-            raise ValueError(f"No wire path generated for {arch_type} arch")
-        
-        if self.opposing_arch_data is None:
+        if not self.has_opposing_arch():
             raise ValueError("No opposing arch loaded for collision detection")
         
-        # Use collision detector to find intersections
-        from .collision_detector2 import CollisionDetector2
-        collision_detector = CollisionDetector2()
+        arch_data = self.arch_data[arch_type]
+        wire_path = arch_data.get('wire_path')
         
-        collisions = collision_detector.detect_wire_mesh_collisions(
-            arch_data['wire_path'],
-            self.opposing_arch_data['mesh']
-        )
+        if wire_path is None or len(wire_path) == 0:
+            raise ValueError(f"No wire path found for {arch_type} arch")
         
+        # Simple collision detection: check if wire points are inside opposing mesh
+        collisions = []
+        
+        # Convert opposing mesh to point cloud for distance calculations
+        opposing_vertices = np.asarray(self.opposing_arch_mesh.vertices)
+        
+        # For each wire point, check distance to nearest opposing mesh vertex
+        collision_threshold = 2.0  # mm - adjust based on wire diameter
+        
+        for wire_point in wire_path:
+            distances = np.linalg.norm(opposing_vertices - wire_point, axis=1)
+            min_distance = np.min(distances)
+            
+            if min_distance < collision_threshold:
+                collisions.append(wire_point.copy())
+        
+        print(f"Found {len(collisions)} collision points")
         return collisions
     
     # ============================================
     # EXPORT FUNCTIONS
     # ============================================
     
-    def export_gcode(self, file_path: str, arch_type: str = None):
-        """Export wire as G-code"""
+    def export_gcode(self, wire_size: float = 0.9, arch_type: str = None) -> str:
+        """Export wire path as G-code"""
         if arch_type is None:
             arch_type = self.active_arch
         
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None or arch_data['wire_path'] is None:
-            raise ValueError(f"No wire path to export for {arch_type} arch")
+        arch_data = self.arch_data[arch_type]
+        wire_path = arch_data.get('wire_path')
         
-        self.gcode_generator.generate_gcode(arch_data['wire_path'], file_path)
+        if wire_path is None or len(wire_path) == 0:
+            return ""
+        
+        # Generate G-code
+        gcode_lines = [
+            "; Orthodontic Wire G-Code",
+            f"; Arch: {arch_type}",
+            f"; Wire Size: {wire_size}mm",
+            f"; Points: {len(wire_path)}",
+            "",
+            "G21 ; mm",
+            "G90 ; absolute",
+            "G28 ; home",
+            ""
+        ]
+        
+        # Add wire path movements
+        for i, point in enumerate(wire_path):
+            x, y, z = point
+            gcode_lines.append(f"G1 X{x:.3f} Y{y:.3f} Z{z:.3f} F1000")
+        
+        gcode_lines.append("")
+        gcode_lines.append("M30 ; end")
+        
+        return "\n".join(gcode_lines)
     
     def export_esp32(self, file_path: str, arch_type: str = None):
-        """Export wire as ESP32 Arduino code"""
-        if arch_type is None:
-            arch_type = self.active_arch
-        
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None or arch_data['wire_path'] is None:
-            raise ValueError(f"No wire path to export for {arch_type} arch")
-        
-        self.esp32_generator.generate_code(arch_data['wire_path'], file_path)
+        """Export wire path as ESP32 Arduino code"""
+        # Placeholder implementation
+        print(f"ESP32 export to {file_path} - not yet implemented")
     
     def export_stl(self, file_path: str, arch_type: str = None):
-        """Export wire as STL file"""
-        if arch_type is None:
-            arch_type = self.active_arch
-        
-        arch_data = self.get_arch_data(arch_type)
-        if arch_data is None or arch_data['wire_path'] is None:
-            raise ValueError(f"No wire path to export for {arch_type} arch")
-        
-        self.stl_exporter.export_wire_stl(arch_data['wire_path'], file_path)
+        """Export wire as STL mesh"""
+        # Placeholder implementation
+        print(f"STL export to {file_path} - not yet implemented")
     
     # ============================================
-    # UTILITY FUNCTIONS
+    # STATUS AND UTILITIES
     # ============================================
     
     def get_workflow_status(self) -> Dict[str, Any]:
         """Get current workflow status"""
+        upper_data = self.arch_data['upper']
+        lower_data = self.arch_data['lower']
+        
         return {
             'mode': self.current_mode.value,
             'active_arch': self.active_arch,
-            'upper_loaded': self.upper_arch_data is not None,
-            'lower_loaded': self.lower_arch_data is not None,
-            'opposing_loaded': self.opposing_arch_data is not None,
-            'dual_arch_loaded': self.is_dual_arch_loaded(),
-            'height_offset': self.global_height_offset
+            'upper_loaded': upper_data['mesh'] is not None,
+            'lower_loaded': lower_data['mesh'] is not None,
+            'upper_teeth': len(upper_data['teeth_detected']),
+            'lower_teeth': len(lower_data['teeth_detected']),
+            'upper_wire': upper_data['wire_path'] is not None,
+            'lower_wire': lower_data['wire_path'] is not None,
+            'height_offset': self.global_height_offset,
+            'opposing_arch': self.has_opposing_arch()
         }
     
     def reset_workflow(self):
         """Reset all workflow data"""
-        self.upper_arch_data = None
-        self.lower_arch_data = None
-        self.opposing_arch_data = None
-        self.active_arch = 'upper'
+        self.arch_data = {
+            'upper': {
+                'mesh': None,
+                'file_path': None,
+                'teeth_detected': [],
+                'bracket_positions': [],
+                'control_points': [],
+                'wire_path': None,
+                'arch_center': None
+            },
+            'lower': {
+                'mesh': None,
+                'file_path': None,
+                'teeth_detected': [],
+                'bracket_positions': [],
+                'control_points': [],
+                'wire_path': None,
+                'arch_center': None
+            }
+        }
+        self.opposing_arch_mesh = None
         self.global_height_offset = 0.0
-        self.current_mode = WorkflowMode.AUTOMATIC
+        print("Workflow reset")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+"""pip  
 Hybrid Orthodontic Wire Generator Application
 
 This is the main entry point for the enhanced hybrid workflow application

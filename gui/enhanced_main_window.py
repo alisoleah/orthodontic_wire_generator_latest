@@ -13,6 +13,8 @@ import os
 import numpy as np
 from typing import Optional, Dict, Any
 
+from visualization.pyvista_visualizer import PyVistaVisualizer
+
 # Add the parent directory to the path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -87,7 +89,9 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         splitter.addWidget(self.control_panel)
         
         # CENTER - 3D Visualization
-        self.visualizer = DualArchVisualizer()
+        # self.visualizer = DualArchVisualizer()
+        from visualization.pyvista_visualizer import PyVistaVisualizer
+        self.visualizer = PyVistaVisualizer()
         self.visualizer.setMinimumWidth(800)
         splitter.addWidget(self.visualizer)
         
@@ -345,6 +349,58 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.update_mode_display(mode)
         self.status_panel.update_workflow_mode(mode)
         self.update_status(f"Switched to {mode} mode")
+        
+        # CLEAR EXISTING VISUALIZATIONS when switching modes
+        if self.visualizer:
+            # Disable any active picking
+            try:
+                self.visualizer.plotter.disable_picking()
+                self.visualizer.picking_enabled = False
+            except:
+                pass
+            
+            # Clear wire visualization
+            try:
+                self.visualizer.plotter.remove_actor('wire')
+            except:
+                pass
+            
+            # Clear control points for manual/hybrid modes
+            if mode == 'automatic':
+                # Clear manual control points
+                for i in range(20):  # Clear up to 20 control points
+                    try:
+                        self.visualizer.plotter.remove_actor(f'cp_{i}')
+                        self.visualizer.plotter.remove_actor(f'point_{i}')
+                        self.visualizer.plotter.remove_actor(f'label_{i}')
+                    except:
+                        pass
+                
+                try:
+                    self.visualizer.plotter.remove_actor('reference_plane')
+                except:
+                    pass
+                
+                self.visualizer.control_points = []
+                self.visualizer.selected_points = []
+                
+                # RE-RUN automatic detection if arch is already loaded
+                active_arch = self.workflow_manager.get_active_arch()
+                arch_data = self.workflow_manager.get_arch_data(active_arch)
+                
+                if arch_data and arch_data.get('mesh') is not None:
+                    # Arch is loaded, re-run automatic detection
+                    try:
+                        detected_teeth, bracket_positions, wire_path = \
+                            self.workflow_manager.run_automatic_detection(active_arch)
+                        
+                        # Display the wire
+                        if wire_path is not None:
+                            self.visualizer.display_wire_path(wire_path)
+                            self.status_panel.update_wire_info(wire_path)
+                            self.update_status("Wire regenerated in automatic mode")
+                    except Exception as e:
+                        self.update_status(f"Error regenerating wire: {str(e)}")
     
     def on_active_arch_changed(self, arch_type: str):
         """Handle active arch change and synchronize the visualizer's state."""
@@ -400,8 +456,16 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
                     # Update control panel button text for the 3-point manual workflow
                     if hasattr(self.control_panel, 'define_path_btn'):
                         self.control_panel.define_path_btn.setText(f"Define Wire Path ({count}/3)")
-                    if hasattr(self.control_panel, 'generate_wire_btn') and count >= 3:
-                        self.control_panel.generate_wire_btn.setEnabled(True)
+                    
+                    # CRITICAL: Enable generate button when 3 points are selected
+                    if hasattr(self.control_panel, 'generate_wire_btn'):
+                        if count >= 3:
+                            self.control_panel.generate_wire_btn.setEnabled(True)
+                            self.control_panel.reset_path_btn.setEnabled(True)
+                            self.control_panel.define_path_btn.setEnabled(False)
+                            self.update_status("✓ 3 points selected! Click 'Generate Wire'")
+                        else:
+                            self.control_panel.generate_wire_btn.setEnabled(False)
 
         except Exception as e:
             self.update_status(f"Error adding point: {str(e)}")
