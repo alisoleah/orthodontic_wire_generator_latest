@@ -668,4 +668,4 @@ class WorkflowManager:
         }
         self.opposing_arch_mesh = None
         self.global_height_offset = 0.0
-        print("Workflow reset")
+        print("Workflow reset") 
