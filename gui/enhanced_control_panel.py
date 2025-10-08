@@ -30,6 +30,7 @@ except ImportError:
     # Fallback implementation would go here
 
 from core.workflow_manager import WorkflowManager, WorkflowMode
+from visualization.point_selector import DentalPointSelector
 
 
 class EnhancedControlPanel(QWidget):
@@ -582,12 +583,32 @@ class EnhancedControlPanel(QWidget):
     # ============================================
     
     def start_occlusal_plane_definition(self):
-        """Start placing points for occlusal plane"""
-        self.start_plane_btn.setText("Placing Points... (Click on 3 tooth tips)")
-        self.start_plane_btn.setEnabled(False)
-        self.reset_plane_btn.setEnabled(True)
-        # Emit signal to set visualizer to plane definition mode
-        self.interaction_mode_requested.emit('DEFINE_PLANE')
+        """Launch the PyVista point selector to define the occlusal plane."""
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        if not arch_data or arch_data.get('mesh') is None:
+            QMessageBox.warning(self, "No Mesh", "Please load an arch before selecting points.")
+            return
+
+        # The parent window for the selector is the main window
+        main_window = self.parent().parent().parent()
+
+        selector = DentalPointSelector(
+            o3d_mesh=arch_data['mesh'],
+            parent_window=main_window,
+            n_points=3
+        )
+        selected_points = selector.show()
+
+        if selected_points and len(selected_points) == 3:
+            self.workflow_manager.set_occlusal_plane_points(selected_points)
+            self.start_plane_btn.setText(f"Points Selected (3/3)")
+            self.reset_plane_btn.setEnabled(True)
+            self.start_points_btn.setEnabled(True) # Enable next step
+            QMessageBox.information(self, "Success", "Occlusal plane points selected successfully.")
+        else:
+            QMessageBox.warning(self, "Selection Canceled", "Point selection was canceled or incomplete.")
     
     def reset_occlusal_plane(self):
         """Reset occlusal plane"""
@@ -597,10 +618,35 @@ class EnhancedControlPanel(QWidget):
         self.reset_plane_btn.setEnabled(False)
     
     def start_control_point_placement(self):
-        """Start placing control points"""
-        self.start_points_btn.setText("Placing Points... (Click on tooth surfaces)")
-        # Emit signal to set visualizer to point placement mode
-        self.interaction_mode_requested.emit('PLACE_POINTS')
+        """Launch the PyVista point selector for open-ended control point selection."""
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        if not arch_data or arch_data.get('mesh') is None:
+            QMessageBox.warning(self, "No Mesh", "Please load an arch before selecting points.")
+            return
+
+        # The parent window for the selector is the main window
+        main_window = self.parent().parent().parent()
+
+        selector = DentalPointSelector(
+            o3d_mesh=arch_data['mesh'],
+            parent_window=main_window,
+            n_points=0  # 0 indicates open-ended selection
+        )
+        selected_points = selector.show()
+
+        if selected_points:
+            # Clear previous points and add the new ones
+            self.workflow_manager.clear_control_points(active_arch)
+            for point in selected_points:
+                self.workflow_manager.add_control_point(point, active_arch)
+
+            self.start_points_btn.setText(f"Points Selected ({len(selected_points)})")
+            self.generate_wire_btn.setEnabled(True)
+            QMessageBox.information(self, "Success", f"{len(selected_points)} control points selected.")
+        else:
+            QMessageBox.warning(self, "Selection Canceled", "No control points were selected.")
     
     def remove_last_control_point(self):
         """Remove last placed control point"""

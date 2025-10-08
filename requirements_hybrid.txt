@@ -9,6 +9,7 @@ PyQt5-sip>=12.8.0
 # 3D Visualization
 PyOpenGL>=3.1.0
 PyOpenGL-accelerate>=3.1.0
+pyvista>=0.43.0
 
 # Scientific Computing (Core)
 numpy>=1.19.0
