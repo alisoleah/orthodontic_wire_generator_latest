@@ -126,7 +126,12 @@ class ToothDetector:
             })
         
         # Filter teeth that are too close together
-        return self._filter_close_teeth(teeth)
+        filtered_teeth = self._filter_close_teeth(teeth)
+
+        # Classify teeth into incisors, canines, and posterior
+        classified_teeth = self.classify_teeth(filtered_teeth, center)
+
+        return classified_teeth
     
     def _filter_close_teeth(self, teeth: List[Dict]) -> List[Dict]:
         """Remove teeth that are too close to each other."""
@@ -165,7 +170,8 @@ class ToothDetector:
             tooth['type'] = 'posterior'
         
         # Sort by anterior position (most anterior first)
-        teeth_by_ap = sorted(teeth, key=lambda t: t['ap_position'], reverse=True)
+        # Lower ap_position values are more anterior (front), higher are posterior (back)
+        teeth_by_ap = sorted(teeth, key=lambda t: t['ap_position'], reverse=False)
         
         # Take the 6 most anterior teeth
         anterior_count = min(6, len(teeth_by_ap))

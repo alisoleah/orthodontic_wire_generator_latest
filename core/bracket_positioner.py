@@ -64,8 +64,8 @@ class BracketPositioner:
         # Apply clinical offset
         bracket_pos = bracket_pos + normal * self.clinical_offset
         
-        # Determine visibility (only posterior teeth get brackets in this example)
-        visible = tooth_type == 'posterior'
+        # Determine visibility (only frontal teeth get brackets: incisors and canines)
+        visible = tooth_type in ['incisor', 'canine']
         
         return {
             'position': bracket_pos,
