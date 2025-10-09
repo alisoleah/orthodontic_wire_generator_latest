@@ -43,6 +43,7 @@ class EnhancedControlPanel(QWidget):
     interaction_mode_requested = pyqtSignal(str)  # mode (DEFINE_PLANE, PLACE_POINTS, etc.)
     control_points_converted = pyqtSignal(list) # list of control points
     gcode_exported = pyqtSignal(str) # The generated G-code content
+    esp32_code_exported = pyqtSignal(str) # The generated ESP32 code content
     jaw_rotation_changed = pyqtSignal(int) # The new rotation angle
     
     def __init__(self, workflow_manager: WorkflowManager, parent=None):
@@ -775,16 +776,31 @@ class EnhancedControlPanel(QWidget):
             QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
     
     def export_esp32(self):
-        """Export ESP32 code"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save ESP32 Code", "", "Arduino Files (*.ino)"
-        )
-        if file_path:
-            try:
-                self.workflow_manager.export_esp32(file_path)
-                QMessageBox.information(self, "Success", "ESP32 code exported successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+        """Generate ESP32 code and display it in the GUI, with an option to save."""
+        try:
+            wire_diameter = self.wire_diameter.value()
+            esp32_code = self.workflow_manager.export_esp32(wire_size=wire_diameter)
+
+            if esp32_code:
+                self.esp32_code_exported.emit(esp32_code)
+                QMessageBox.information(self, "ESP32 Code Generated", "ESP32 code is now displayed in the Exported Code Viewer.")
+
+                reply = QMessageBox.question(self, 'Save ESP32 Code', 'Do you want to save the ESP32 code to a file?',
+                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+
+                if reply == QMessageBox.Yes:
+                    file_path, _ = QFileDialog.getSaveFileName(
+                        self, "Save ESP32 Code", "", "Arduino Files (*.ino)"
+                    )
+                    if file_path:
+                        with open(file_path, 'w') as f:
+                            f.write(esp32_code)
+                        QMessageBox.information(self, "Success", f"ESP32 code saved to {file_path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", "Could not generate ESP32 code. Ensure a wire path exists.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
     
     def export_stl(self):
         """Export STL"""

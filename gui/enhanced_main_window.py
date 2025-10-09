@@ -231,6 +231,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.control_panel.interaction_mode_requested.connect(self.on_interaction_mode_requested)
         self.control_panel.control_points_converted.connect(self.on_control_points_converted)
         self.control_panel.gcode_exported.connect(self.on_gcode_exported)
+        self.control_panel.esp32_code_exported.connect(self.on_esp32_code_exported)
         self.control_panel.jaw_rotation_changed.connect(self.on_jaw_rotation_changed)
         
         # Visualizer signals
@@ -516,6 +517,11 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         """Display the generated G-code in the status panel's code viewer."""
         if self.status_panel:
             self.status_panel.display_exported_code(gcode_content)
+
+    def on_esp32_code_exported(self, esp32_code: str):
+        """Display the generated ESP32 code in the status panel's code viewer."""
+        if self.status_panel:
+            self.status_panel.display_exported_code(esp32_code)
 
     def on_jaw_rotation_changed(self, angle: int):
         """Handle the jaw rotation slider change and update the visualizer."""

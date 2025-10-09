@@ -615,10 +615,28 @@ class WorkflowManager:
         
         return "\n".join(gcode_lines)
     
-    def export_esp32(self, file_path: str, arch_type: str = None):
-        """Export wire path as ESP32 Arduino code"""
-        # Placeholder implementation
-        print(f"ESP32 export to {file_path} - not yet implemented")
+    def export_esp32(self, wire_size: float = 0.9, arch_type: str = None) -> str:
+        """Export wire path as ESP32 Arduino code and return the code as string"""
+        from export.esp32_generator import ESP32Generator
+
+        if arch_type is None:
+            arch_type = self.active_arch
+
+        arch_data = self.arch_data[arch_type]
+        wire_path = arch_data.get('wire_path')
+
+        if wire_path is None or len(wire_path) == 0:
+            return ""
+
+        # Generate ESP32 code
+        generator = ESP32Generator()
+        esp32_code = generator.generate(
+            wire_path=wire_path,
+            arch_type=arch_type,
+            wire_size=f"{wire_size}mm"
+        )
+
+        return esp32_code
     
     def export_stl(self, file_path: str, arch_type: str = None):
         """Export wire as STL mesh"""
