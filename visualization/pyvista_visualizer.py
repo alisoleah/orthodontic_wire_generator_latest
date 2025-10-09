@@ -47,11 +47,15 @@ class PyVistaVisualizer(QWidget):
         self.upper_mesh = None
         self.lower_mesh = None
         
-        # Control points and wire path
+        # Control points and wire path (per-arch)
         self.control_points = []
         self.wire_path = None
         self.detected_teeth = []
         self.bracket_positions = []
+
+        # Store wire paths for both arches
+        self.upper_wire = None
+        self.lower_wire = None
         
         # Visualization settings
         self.plotter.set_background('white')
@@ -389,28 +393,39 @@ class PyVistaVisualizer(QWidget):
         except:
             pass
     
-    def display_wire_path(self, wire_points: np.ndarray):
-        """Display the generated wire as a 3D line."""
-        # Remove old wire
+    def display_wire_path(self, wire_points: np.ndarray, arch_type: str = None):
+        """Display the generated wire as a 3D line for specific arch."""
+        if arch_type is None:
+            arch_type = self.current_arch
+
+        # Store wire for this arch
+        if arch_type == 'upper':
+            self.upper_wire = wire_points
+        else:
+            self.lower_wire = wire_points
+
+        # Remove old wire for this arch
+        wire_name = f'{arch_type}_wire'
         try:
-            self.plotter.remove_actor('wire')
+            self.plotter.remove_actor(wire_name)
         except:
             pass
-        
+
         if wire_points is None or len(wire_points) < 2:
             return
-        
-        # Store wire path
+
+        # Store generic wire path for backward compatibility
         self.wire_path = wire_points
-        
-        # Create wire as polyline
+
+        # Create wire as polyline with arch-specific color
         wire_line = pv.lines_from_points(wire_points)
-        
+        wire_color = 'red' if arch_type == 'upper' else 'blue'
+
         self.wire_actor = self.plotter.add_mesh(
             wire_line,
-            color='red',
+            color=wire_color,
             line_width=5,
-            name='wire'
+            name=wire_name
         )
     
     def display_editable_control_points(self, control_points: list):

@@ -359,9 +359,13 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
             except:
                 pass
             
-            # Clear wire visualization
+            # Clear wire visualization for both arches
             try:
-                self.visualizer.plotter.remove_actor('wire')
+                self.visualizer.plotter.remove_actor('upper_wire')
+            except:
+                pass
+            try:
+                self.visualizer.plotter.remove_actor('lower_wire')
             except:
                 pass
             
@@ -393,10 +397,10 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
                     try:
                         detected_teeth, bracket_positions, wire_path = \
                             self.workflow_manager.run_automatic_detection(active_arch)
-                        
-                        # Display the wire
+
+                        # Display the wire with arch type for dual-wire support
                         if wire_path is not None:
-                            self.visualizer.display_wire_path(wire_path)
+                            self.visualizer.display_wire_path(wire_path, active_arch)
                             self.status_panel.update_wire_info(wire_path)
                             self.update_status("Wire regenerated in automatic mode")
                     except Exception as e:
@@ -435,9 +439,10 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         """Handle wire generation completion"""
         arch_type = self.workflow_manager.get_active_arch()
         arch_data = self.workflow_manager.get_active_arch_data()
-        
+
         if arch_data and arch_data['wire_path'] is not None:
-            self.visualizer.display_wire_path(arch_data['wire_path'])
+            # Display wire with arch type for dual-wire support
+            self.visualizer.display_wire_path(arch_data['wire_path'], arch_type)
             self.status_panel.update_wire_info(arch_data['wire_path'])
             self.update_status("Wire generated successfully")
     

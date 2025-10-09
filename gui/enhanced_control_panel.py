@@ -303,14 +303,18 @@ class EnhancedControlPanel(QWidget):
         if file_path:
             try:
                 self.workflow_manager.load_arch(file_path, arch_type)
-                
+
+                # Auto-switch active arch to the one being loaded
+                self.workflow_manager.set_active_arch(arch_type)
                 if arch_type == 'upper':
+                    self.active_upper.setChecked(True)
                     self.upper_status.setText("✓ Loaded")
                     self.upper_status.setStyleSheet("color: green;")
                 else:
+                    self.active_lower.setChecked(True)
                     self.lower_status.setText("✓ Loaded")
                     self.lower_status.setStyleSheet("color: green;")
-                
+
                 # Emit signal for main window to update visualizer
                 self.arch_loaded.emit(arch_type, file_path)
                 
