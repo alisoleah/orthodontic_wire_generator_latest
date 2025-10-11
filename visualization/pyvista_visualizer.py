@@ -467,9 +467,76 @@ class PyVistaVisualizer(QWidget):
     
     def set_jaw_rotation(self, angle: int):
         """Rotate the lower jaw (for occlusal simulation)."""
-        # This would implement jaw opening simulation
-        # For now, just a placeholder
-        pass
+        if self.lower_mesh is None:
+            return
+
+        # Store original mesh if not already stored
+        if not hasattr(self, 'original_lower_mesh'):
+            self.original_lower_mesh = self.lower_mesh.copy()
+            if self.lower_wire is not None:
+                self.original_lower_wire = self.lower_wire.copy()
+
+        # Get the bounds and compute hinge point from original mesh
+        bounds = self.original_lower_mesh.bounds
+        hinge_point = np.array([
+            (bounds[0] + bounds[1]) / 2,  # Center in X (left-right)
+            bounds[3],  # Back of jaw (max Y - anterior-posterior)
+            bounds[4]   # Bottom of jaw (min Z - height)
+        ])
+
+        # Create rotated mesh from original
+        rotated_mesh = self.original_lower_mesh.copy()
+        rotated_mesh.translate(-hinge_point, inplace=True)
+        rotated_mesh.rotate_x(angle, inplace=True)
+        rotated_mesh.translate(hinge_point, inplace=True)
+
+        # Update the lower arch
+        try:
+            self.plotter.remove_actor('lower_arch')
+        except:
+            pass
+
+        color = 'lightblue'
+        opacity = 1.0 if self.current_arch == 'lower' else 0.3
+        self.plotter.add_mesh(
+            rotated_mesh,
+            color=color,
+            show_edges=True,
+            pickable=(self.current_arch == 'lower'),
+            name='lower_arch',
+            opacity=opacity
+        )
+
+        # Also rotate wire if present (wire is numpy array of points)
+        if self.lower_wire is not None and hasattr(self, 'original_lower_wire'):
+            # Rotate wire points using rotation matrix
+            angle_rad = np.radians(angle)
+            rotation_matrix = np.array([
+                [1, 0, 0],
+                [0, np.cos(angle_rad), -np.sin(angle_rad)],
+                [0, np.sin(angle_rad), np.cos(angle_rad)]
+            ])
+
+            # Translate to origin, rotate, translate back
+            rotated_wire_points = self.original_lower_wire.copy()
+            rotated_wire_points -= hinge_point
+            rotated_wire_points = rotated_wire_points @ rotation_matrix.T
+            rotated_wire_points += hinge_point
+
+            try:
+                self.plotter.remove_actor('lower_wire')
+            except:
+                pass
+
+            wire_line = pv.lines_from_points(rotated_wire_points)
+            self.plotter.add_mesh(
+                wire_line,
+                color='blue',
+                line_width=5,
+                name='lower_wire'
+            )
+
+        self.plotter.render()
     
     def update(self):
         """Force update of the visualization."""

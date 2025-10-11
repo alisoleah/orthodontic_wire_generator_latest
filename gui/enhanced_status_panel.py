@@ -9,7 +9,8 @@ import numpy as np
 from typing import Dict, Any
 
 try:
-    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QGroupBox, QLabel, QFrame
+    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QGroupBox, QLabel, QFrame, QScrollArea
+    from PyQt5.QtCore import Qt
 except ImportError:
     # This check is for environments where PyQt5 might not be installed.
     # The main application handles the fallback.
@@ -29,12 +30,30 @@ class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
 
     def init_ui(self):
         """Initialize status panel UI"""
-        layout = QVBoxLayout()
+        # Main layout for this widget
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(main_layout)
 
-        # Title
+        # Title (outside scroll area to stay visible)
         title = QLabel("Status & Information")
         title.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
-        layout.addWidget(title)
+        main_layout.addWidget(title)
+
+        # Create scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        main_layout.addWidget(scroll)
+
+        # Create content widget for scroll area
+        content_widget = QWidget()
+        scroll.setWidget(content_widget)
+
+        # Layout for scrollable content
+        layout = QVBoxLayout()
+        content_widget.setLayout(layout)
 
         # Workflow status
         workflow_group = QFrame()
@@ -85,8 +104,6 @@ class EnhancedStatusPanel(QWidget if PYQT5_AVAILABLE else object):
 
         # Add stretch to push content to top
         layout.addStretch()
-
-        self.setLayout(layout)
 
     def update_workflow_mode(self, mode: str):
         """Update workflow mode display"""
