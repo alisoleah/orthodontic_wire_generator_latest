@@ -68,7 +68,13 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
     def init_ui(self):
         """Initialize the user interface"""
         self.setWindowTitle("Orthodontic Wire Generator - Professional Hybrid Edition")
-        self.setGeometry(100, 100, 1600, 1000)
+
+        # Set minimum window size but allow maximize
+        self.setMinimumSize(1200, 700)
+        self.resize(1600, 1000)  # Default size
+
+        # Allow maximize by default
+        # self.setGeometry(100, 100, 1600, 1000)  # Removed fixed geometry
         
         # Create central widget
         central_widget = QWidget()
@@ -84,25 +90,30 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         
         # LEFT PANEL - Enhanced Control Panel
         self.control_panel = EnhancedControlPanel(self.workflow_manager)
-        self.control_panel.setMinimumWidth(350)
-        self.control_panel.setMaximumWidth(450)
+        self.control_panel.setMinimumWidth(300)
+        # Remove max width to allow resizing
         splitter.addWidget(self.control_panel)
         
         # CENTER - 3D Visualization
         # self.visualizer = DualArchVisualizer()
         from visualization.pyvista_visualizer import PyVistaVisualizer
         self.visualizer = PyVistaVisualizer()
-        self.visualizer.setMinimumWidth(800)
+        self.visualizer.setMinimumWidth(600)
         splitter.addWidget(self.visualizer)
-        
+
         # RIGHT PANEL - Status and Information
         self.status_panel = EnhancedStatusPanel()
-        self.status_panel.setMinimumWidth(300)
-        self.status_panel.setMaximumWidth(400)
+        self.status_panel.setMinimumWidth(250)
+        # Remove max width to allow resizing
         splitter.addWidget(self.status_panel)
-        
-        # Set splitter proportions
-        splitter.setSizes([350, 900, 350])
+
+        # Set splitter proportions (control:visualizer:status = 2:5:2)
+        splitter.setSizes([300, 900, 300])
+
+        # Set stretch factors to make visualizer expand more
+        splitter.setStretchFactor(0, 1)  # Control panel
+        splitter.setStretchFactor(1, 3)  # Visualizer (gets most space)
+        splitter.setStretchFactor(2, 1)  # Status panel
 
         # Create menu bar
         self.create_menu_bar()

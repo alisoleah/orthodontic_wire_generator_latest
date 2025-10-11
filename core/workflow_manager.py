@@ -41,6 +41,7 @@ class WorkflowManager:
         self.current_mode = WorkflowMode.AUTOMATIC
         self.active_arch = 'upper'
         self.global_height_offset = 0.0
+        self.global_ap_offset = 0.0  # Anterior/Posterior offset
         
         # Data storage for both arches
         self.arch_data = {
@@ -100,6 +101,11 @@ class WorkflowManager:
         """Set global height offset for wire"""
         self.global_height_offset = height_offset
         print(f"Global height offset set to: {height_offset:.2f}mm")
+
+    def set_global_ap_offset(self, ap_offset: float):
+        """Set global anterior/posterior offset for wire"""
+        self.global_ap_offset = ap_offset
+        print(f"Global AP offset set to: {ap_offset:.2f}mm")
     
     # ============================================
     # MESH LOADING
@@ -232,13 +238,17 @@ class WorkflowManager:
         # Extract control points from bracket positions
         control_points = []
         for bracket in visible_brackets:
-            # Use the current position (with height offset applied)
-            pos = bracket['position'].copy()
-            
-            # Apply global height offset
+            # Use the original position and apply offsets
+            pos = bracket['original_position'].copy()
+
+            # Apply height offset
             if self.global_height_offset != 0.0:
-                normal = bracket['normal']
-                pos = pos + normal * self.global_height_offset
+                pos = pos + bracket['normal'] * self.global_height_offset
+
+            # Apply AP offset
+            if self.global_ap_offset != 0.0:
+                ap_direction = np.array([0, self.global_ap_offset, 0])
+                pos = pos + ap_direction
             
             control_points.append({
                 'position': pos,
@@ -405,7 +415,11 @@ class WorkflowManager:
             pos = bracket['position'].copy()
             if self.global_height_offset != 0.0:
                 pos = pos + bracket['normal'] * self.global_height_offset
-            
+            if self.global_ap_offset != 0.0:
+                # Apply AP offset (index 1 is typically AP axis)
+                ap_direction = np.array([0, self.global_ap_offset, 0])
+                pos = pos + ap_direction
+
             all_control_points.append({
                 'position': pos,
                 'original_position': bracket['original_position'].copy(),
@@ -430,7 +444,11 @@ class WorkflowManager:
             pos = bracket['position'].copy()
             if self.global_height_offset != 0.0:
                 pos = pos + bracket['normal'] * self.global_height_offset
-            
+            if self.global_ap_offset != 0.0:
+                # Apply AP offset (index 1 is typically AP axis)
+                ap_direction = np.array([0, self.global_ap_offset, 0])
+                pos = pos + ap_direction
+
             all_control_points.append({
                 'position': pos,
                 'original_position': bracket['original_position'].copy(),

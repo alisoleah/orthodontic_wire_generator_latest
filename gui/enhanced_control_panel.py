@@ -19,7 +19,7 @@ try:
     from PyQt5.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
         QRadioButton, QCheckBox, QSlider, QDoubleSpinBox, QFormLayout,
-        QFileDialog, QMessageBox, QProgressDialog, QApplication
+        QFileDialog, QMessageBox, QProgressDialog, QApplication, QScrollArea
     )
     from PyQt5.QtCore import Qt, pyqtSignal
     from PyQt5.QtGui import QFont
@@ -53,12 +53,30 @@ class EnhancedControlPanel(QWidget):
         
     def init_ui(self):
         """Initialize the user interface"""
+        # Main layout for this widget
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(main_layout)
+
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        main_layout.addWidget(scroll)
+
+        # Create content widget for scroll area
+        content_widget = QWidget()
+        scroll.setWidget(content_widget)
+
+        # Layout for scrollable content
         layout = QVBoxLayout()
-        
+        content_widget.setLayout(layout)
+
         # Set font for better readability
         font = QFont()
         font.setPointSize(9)
-        self.setFont(font)
+        content_widget.setFont(font)
         
         # ============================================
         # SECTION 1: FILE LOADING
@@ -198,7 +216,23 @@ class EnhancedControlPanel(QWidget):
         height_layout.addWidget(self.height_label)
         
         params_layout.addRow("Wire Height Offset:", height_layout)
-        
+
+        # Anterior/Posterior adjustment slider (forward/backward)
+        self.ap_slider = QSlider(Qt.Horizontal)
+        self.ap_slider.setMinimum(-50)  # -5.0mm
+        self.ap_slider.setMaximum(50)   # +5.0mm
+        self.ap_slider.setValue(0)
+        self.ap_slider.setTickPosition(QSlider.TicksBelow)
+        self.ap_slider.setTickInterval(10)
+        self.ap_slider.valueChanged.connect(self.on_ap_offset_changed)
+
+        self.ap_label = QLabel("0.0 mm")
+        ap_layout = QHBoxLayout()
+        ap_layout.addWidget(self.ap_slider)
+        ap_layout.addWidget(self.ap_label)
+
+        params_layout.addRow("Forward/Backward:", ap_layout)
+
         # Wire diameter
         self.wire_diameter = QDoubleSpinBox()
         self.wire_diameter.setRange(0.3, 2.0)
@@ -285,8 +319,6 @@ class EnhancedControlPanel(QWidget):
 
         # Add stretch to push everything to top
         layout.addStretch()
-        
-        self.setLayout(layout)
     
     # ============================================
     # EVENT HANDLERS
@@ -413,6 +445,25 @@ class EnhancedControlPanel(QWidget):
             except Exception as e:
                 print(f"Error updating wire height: {e}")
     
+    def on_ap_offset_changed(self, value):
+        """Handle AP offset slider change and regenerate wire"""
+        ap_mm = value / 10.0
+        self.ap_label.setText(f"{ap_mm:.1f} mm")
+        self.workflow_manager.set_global_ap_offset(ap_mm)
+
+        # Regenerate wire with new AP offset
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        if arch_data and arch_data.get('bracket_positions'):
+            # Regenerate wire path with new offset
+            try:
+                wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
+                # Emit signal to update visualization
+                self.wire_generated.emit()
+            except Exception as e:
+                print(f"Error updating wire AP offset: {e}")
+
     def on_smoothness_changed(self, value):
         """Handle smoothness slider change"""
         self.smoothness_label.setText(f"{value} points")
