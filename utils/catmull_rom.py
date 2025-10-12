@@ -1,12 +1,14 @@
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
-def catmull_rom_spline(points, num_points=100):
+def catmull_rom_spline(points, num_points=300):
     """
     Computes the Catmull-Rom spline for a given set of control points.
+    Updated with Gaussian smoothing for ultra-smooth curves.
 
     Args:
         points (list of np.ndarray): A list of 3D control points.
-        num_points (int): The number of points to generate for the spline.
+        num_points (int): The number of points to generate for the spline (default: 300).
 
     Returns:
         np.ndarray: A numpy array of 3D points representing the spline.
@@ -42,4 +44,17 @@ def catmull_rom_spline(points, num_points=100):
         segment = T @ C @ np.array([p0, p1, p2, p3])
         spline_points.extend(segment)
 
-    return np.array(spline_points)
+    spline_array = np.array(spline_points)
+
+    # Apply Gaussian smoothing for ultra-smooth curves
+    if len(spline_array) > 5:
+        smoothed = spline_array.copy()
+        for dim in range(3):  # X, Y, Z
+            temp = spline_array[:, dim].copy()
+            # Apply 5 passes of Gaussian smoothing with sigma=12.0
+            for _ in range(5):
+                temp = gaussian_filter1d(temp, sigma=12.0, mode='nearest')
+            smoothed[:, dim] = temp
+        return smoothed
+
+    return spline_array

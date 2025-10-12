@@ -203,11 +203,11 @@ class EnhancedControlPanel(QWidget):
         
         # Height adjustment slider
         self.height_slider = QSlider(Qt.Horizontal)
-        self.height_slider.setMinimum(-50)  # -5.0mm
-        self.height_slider.setMaximum(50)   # +5.0mm
+        self.height_slider.setMinimum(-100)  # -10.0mm
+        self.height_slider.setMaximum(100)   # +10.0mm
         self.height_slider.setValue(0)
         self.height_slider.setTickPosition(QSlider.TicksBelow)
-        self.height_slider.setTickInterval(10)
+        self.height_slider.setTickInterval(20)
         self.height_slider.valueChanged.connect(self.on_height_changed)
         
         self.height_label = QLabel("0.0 mm")
@@ -219,11 +219,11 @@ class EnhancedControlPanel(QWidget):
 
         # Anterior/Posterior adjustment slider (forward/backward)
         self.ap_slider = QSlider(Qt.Horizontal)
-        self.ap_slider.setMinimum(-50)  # -5.0mm
-        self.ap_slider.setMaximum(50)   # +5.0mm
+        self.ap_slider.setMinimum(-100)  # -10.0mm
+        self.ap_slider.setMaximum(100)   # +10.0mm
         self.ap_slider.setValue(0)
         self.ap_slider.setTickPosition(QSlider.TicksBelow)
-        self.ap_slider.setTickInterval(10)
+        self.ap_slider.setTickInterval(20)
         self.ap_slider.valueChanged.connect(self.on_ap_offset_changed)
 
         self.ap_label = QLabel("0.0 mm")
@@ -239,15 +239,16 @@ class EnhancedControlPanel(QWidget):
         self.wire_diameter.setValue(0.9)
         self.wire_diameter.setSuffix(" mm")
         self.wire_diameter.setSingleStep(0.1)
+        self.wire_diameter.valueChanged.connect(self.on_wire_diameter_changed)
         params_layout.addRow("Wire Diameter:", self.wire_diameter)
         
         # Smoothness (for spline)
         self.smoothness_slider = QSlider(Qt.Horizontal)
         self.smoothness_slider.setMinimum(10)
-        self.smoothness_slider.setMaximum(200)
-        self.smoothness_slider.setValue(100)
+        self.smoothness_slider.setMaximum(1000)
+        self.smoothness_slider.setValue(300)
         self.smoothness_slider.valueChanged.connect(self.on_smoothness_changed)
-        self.smoothness_label = QLabel("100 points")
+        self.smoothness_label = QLabel("300 points")
         smoothness_layout = QHBoxLayout()
         smoothness_layout.addWidget(self.smoothness_slider)
         smoothness_layout.addWidget(self.smoothness_label)
@@ -440,6 +441,8 @@ class EnhancedControlPanel(QWidget):
             # Regenerate wire path with new height
             try:
                 wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
+                # Store the updated wire path
+                arch_data['wire_path'] = wire_path
                 # Emit signal to update visualization
                 self.wire_generated.emit()
             except Exception as e:
@@ -459,16 +462,38 @@ class EnhancedControlPanel(QWidget):
             # Regenerate wire path with new offset
             try:
                 wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
+                # Store the updated wire path
+                arch_data['wire_path'] = wire_path
                 # Emit signal to update visualization
                 self.wire_generated.emit()
             except Exception as e:
                 print(f"Error updating wire AP offset: {e}")
 
+    def on_wire_diameter_changed(self, value):
+        """Handle wire diameter change"""
+        self.workflow_manager.set_wire_diameter(value)
+        # Wire diameter is mainly for export, but we store it
+
     def on_smoothness_changed(self, value):
-        """Handle smoothness slider change"""
+        """Handle smoothness slider change and regenerate wire"""
         self.smoothness_label.setText(f"{value} points")
-        # This would be used in wire generation
-    
+        self.workflow_manager.set_wire_smoothness(value)
+
+        # Regenerate wire with new smoothness
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        if arch_data and arch_data.get('bracket_positions'):
+            # Regenerate wire path with new smoothness
+            try:
+                wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
+                # Store the updated wire path
+                arch_data['wire_path'] = wire_path
+                # Emit signal to update visualization
+                self.wire_generated.emit()
+            except Exception as e:
+                print(f"Error updating wire smoothness: {e}")
+
     def on_jaw_rotation_changed(self, value):
         """Handle jaw rotation slider change."""
         self.jaw_rotation_label.setText(f"{value}°")

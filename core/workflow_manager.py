@@ -100,12 +100,22 @@ class WorkflowManager:
     def set_global_height(self, height_offset: float):
         """Set global height offset for wire"""
         self.global_height_offset = height_offset
-        print(f"Global height offset set to: {height_offset:.2f}mm")
+        # print(f"Global height offset set to: {height_offset:.2f}mm")
 
     def set_global_ap_offset(self, ap_offset: float):
         """Set global anterior/posterior offset for wire"""
         self.global_ap_offset = ap_offset
-        print(f"Global AP offset set to: {ap_offset:.2f}mm")
+        # print(f"Global AP offset set to: {ap_offset:.2f}mm")
+
+    def set_wire_smoothness(self, smoothness_points: int):
+        """Set wire curve smoothness (number of interpolation points)"""
+        self.wire_path_creator.set_smoothness(smoothness_points)
+        print(f"Wire smoothness set to: {smoothness_points} points")
+
+    def set_wire_diameter(self, diameter_mm: float):
+        """Set wire diameter"""
+        self.wire_path_creator.set_wire_diameter(diameter_mm)
+        print(f"Wire diameter set to: {diameter_mm:.1f}mm")
     
     # ============================================
     # MESH LOADING
@@ -241,11 +251,12 @@ class WorkflowManager:
             # Use the original position and apply offsets
             pos = bracket['original_position'].copy()
 
-            # Apply height offset
+            # Apply height offset - purely vertical (Z-axis, index 2)
             if self.global_height_offset != 0.0:
-                pos = pos + bracket['normal'] * self.global_height_offset
+                height_direction = np.array([0, 0, self.global_height_offset])
+                pos = pos + height_direction
 
-            # Apply AP offset
+            # Apply AP offset - purely anterior-posterior (Y-axis, index 1)
             if self.global_ap_offset != 0.0:
                 ap_direction = np.array([0, self.global_ap_offset, 0])
                 pos = pos + ap_direction
@@ -479,25 +490,47 @@ class WorkflowManager:
     def _generate_simple_spline(self, manual_points: List[Dict]) -> np.ndarray:
         """
         ✅ FIXED: Generate simple spline through manual points (fallback).
-        Now includes arch_center parameter and correct return value handling.
+        Now adds intermediate points for smooth curves.
         """
         # Get arch center
         arch_type = self.active_arch
         arch_data = self.arch_data[arch_type]
         arch_center = arch_data.get('arch_center')
-        
+
         if arch_center is None:
             # Fallback: calculate center from manual points
             positions = [mp['position'] for mp in manual_points]
             arch_center = np.mean(positions, axis=0)
             print(f"Warning: Using calculated center from manual points: {arch_center}")
-        
-        # ✅ FIXED: Handle single return value
+
+        # ✅ NEW: Add intermediate points for smooth curves
+        expanded_points = []
+        for i in range(len(manual_points)):
+            expanded_points.append(manual_points[i])
+
+            # Add intermediate points between each pair
+            if i < len(manual_points) - 1:
+                p1 = manual_points[i]['position']
+                p2 = manual_points[i + 1]['position']
+
+                # Add 8 intermediate points for ultra-smooth transitions
+                for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+                    interp_pos = p1 + t * (p2 - p1)
+                    expanded_points.append({
+                        'position': interp_pos.copy(),
+                        'original_position': interp_pos.copy(),
+                        'type': 'intermediate',
+                        'index': len(expanded_points),
+                        'bend_angle': 0.0,
+                        'vertical_offset': 0.0
+                    })
+
+        # Generate smooth path with expanded points
         wire_path = self.wire_path_creator.create_smooth_path(
-            manual_points,
+            expanded_points,
             arch_center
         )
-        
+
         return wire_path
     
     # ============================================

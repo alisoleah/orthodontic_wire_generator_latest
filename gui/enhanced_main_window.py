@@ -717,15 +717,122 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
     # WINDOW EVENTS
     # ============================================
     
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts for wire adjustment"""
+        key = event.key()
+
+        # Keyboard step size in mm
+        step = 0.1
+
+        # Get current active arch
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        # Only work if brackets are positioned
+        if not arch_data or not arch_data.get('bracket_positions'):
+            return
+
+        # I key = UP (increase height)
+        if key == Qt.Key_I:
+            new_height = self.workflow_manager.global_height_offset + step
+            self.adjust_height_unlimited(new_height)
+
+        # K key = DOWN (decrease height)
+        elif key == Qt.Key_K:
+            new_height = self.workflow_manager.global_height_offset - step
+            self.adjust_height_unlimited(new_height)
+
+        # J key = FORWARD (decrease AP offset)
+        elif key == Qt.Key_J:
+            new_ap = self.workflow_manager.global_ap_offset - step
+            self.adjust_ap_unlimited(new_ap)
+
+        # L key = BACKWARD (increase AP offset)
+        elif key == Qt.Key_L:
+            new_ap = self.workflow_manager.global_ap_offset + step
+            self.adjust_ap_unlimited(new_ap)
+
+        else:
+            # Let other keys be handled normally
+            super().keyPressEvent(event)
+
+    def adjust_height_unlimited(self, new_height: float):
+        """Adjust wire height with unlimited range (bypasses slider limits)"""
+        # Update workflow manager
+        self.workflow_manager.set_global_height(new_height)
+
+        # Update slider if within range
+        slider_min = self.control_panel.height_slider.minimum() / 10.0
+        slider_max = self.control_panel.height_slider.maximum() / 10.0
+
+        if slider_min <= new_height <= slider_max:
+            # Within slider range - update slider
+            self.control_panel.height_slider.blockSignals(True)
+            self.control_panel.height_slider.setValue(int(new_height * 10))
+            self.control_panel.height_slider.blockSignals(False)
+            self.control_panel.height_label.setStyleSheet("")
+        else:
+            # Beyond slider range - just update label with warning color
+            self.control_panel.height_label.setStyleSheet("color: orange; font-weight: bold;")
+
+        # Always update label
+        self.control_panel.height_label.setText(f"{new_height:.1f} mm")
+
+        # Regenerate wire
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        if arch_data and arch_data.get('bracket_positions'):
+            try:
+                wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
+                arch_data['wire_path'] = wire_path
+                self.on_wire_generated()
+            except Exception as e:
+                print(f"Error updating wire height: {e}")
+
+    def adjust_ap_unlimited(self, new_ap: float):
+        """Adjust wire AP offset with unlimited range (bypasses slider limits)"""
+        # Update workflow manager
+        self.workflow_manager.set_global_ap_offset(new_ap)
+
+        # Update slider if within range
+        slider_min = self.control_panel.ap_slider.minimum() / 10.0
+        slider_max = self.control_panel.ap_slider.maximum() / 10.0
+
+        if slider_min <= new_ap <= slider_max:
+            # Within slider range - update slider
+            self.control_panel.ap_slider.blockSignals(True)
+            self.control_panel.ap_slider.setValue(int(new_ap * 10))
+            self.control_panel.ap_slider.blockSignals(False)
+            self.control_panel.ap_label.setStyleSheet("")
+        else:
+            # Beyond slider range - just update label with warning color
+            self.control_panel.ap_label.setStyleSheet("color: orange; font-weight: bold;")
+
+        # Always update label
+        self.control_panel.ap_label.setText(f"{new_ap:.1f} mm")
+
+        # Regenerate wire
+        active_arch = self.workflow_manager.get_active_arch()
+        arch_data = self.workflow_manager.get_arch_data(active_arch)
+
+        if arch_data and arch_data.get('bracket_positions'):
+            try:
+                wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
+                arch_data['wire_path'] = wire_path
+                self.on_wire_generated()
+            except Exception as e:
+                print(f"Error updating wire AP offset: {e}")
+
     def closeEvent(self, event):
         """Handle window close event"""
         reply = QMessageBox.question(
-            self, 'Exit Application', 
+            self, 'Exit Application',
             'Are you sure you want to exit? Any unsaved changes will be lost.',
-            QMessageBox.Yes | QMessageBox.No, 
+            QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-        
+
         if reply == QMessageBox.Yes:
             event.accept()
         else:
