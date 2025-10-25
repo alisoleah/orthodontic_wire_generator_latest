@@ -329,34 +329,45 @@ class WorkflowManager:
     
     def generate_wire_from_control_points(self, arch_type: str = None) -> np.ndarray:
         """
-        ✅ UPDATED METHOD: Generate wire from manually placed control points.
-        Now uses bracket positions to follow teeth between the 3 points.
-        
+        ✅ UPDATED METHOD: Generate wire from control points.
+        - Manual mode (3 points): Uses teeth between points
+        - Hybrid mode (14+ points): Uses control points directly as brackets
+
         Args:
             arch_type: 'upper' or 'lower', defaults to active arch
-            
+
         Returns:
             Wire path as numpy array of 3D points
         """
         if arch_type is None:
             arch_type = self.active_arch
-        
+
         arch_data = self.arch_data[arch_type]
         manual_points = arch_data.get('control_points', [])
-        
+
         if len(manual_points) < 3:
             raise ValueError(f"Need at least 3 control points, have {len(manual_points)}")
-        
-        # ✅ FIX: Use bracket positions if available (follows teeth)
+
         bracket_positions = arch_data.get('bracket_positions', [])
-        
-        if bracket_positions and len(bracket_positions) > 0:
-            # Wire follows teeth using bracket positions
+
+        # Hybrid mode: control_points ARE the brackets (14+), use them directly
+        if len(manual_points) >= 10:
+            # Create bracket-format list from control points
+            bracket_list = [
+                {'position': cp['position'].copy(), 'visible': True}
+                for cp in manual_points
+            ]
+            arch_center = arch_data.get('arch_center')
+            wire_path = self.wire_path_creator.create_smooth_path(
+                bracket_list, arch_center
+            )
+        # Manual mode: Use bracket positions between 3 points
+        elif bracket_positions and len(bracket_positions) > 0:
             wire_path = self._generate_wire_following_teeth(manual_points, bracket_positions)
         else:
-            # Fallback: Simple spline through the 3 points
+            # Fallback: Simple spline
             wire_path = self._generate_simple_spline(manual_points)
-        
+
         arch_data['wire_path'] = wire_path
         return wire_path
     
@@ -561,13 +572,19 @@ class WorkflowManager:
         if wire_path is None or len(wire_path) == 0:
             raise ValueError(f"No wire path found for {arch_type} arch")
         
-        # Extract evenly spaced points from wire path
-        # Use 10-15 control points for good editability
-        num_control_points = min(15, max(5, len(wire_path) // 20))
-        
-        indices = np.linspace(0, len(wire_path) - 1, num_control_points, dtype=int)
-        control_points = [wire_path[i] for i in indices]
-        
+        # Use bracket positions instead of sampling wire path
+        # This keeps all teeth as editable control points
+        bracket_positions = arch_data.get('bracket_positions', [])
+
+        if bracket_positions and len(bracket_positions) > 0:
+            # Use ALL brackets as control points (ignore 'visible' flag for hybrid mode)
+            control_points = [b['position'].copy() for b in bracket_positions]
+        else:
+            # Fallback: sample wire path if no brackets
+            num_control_points = min(15, max(5, len(wire_path) // 20))
+            indices = np.linspace(0, len(wire_path) - 1, num_control_points, dtype=int)
+            control_points = [wire_path[i] for i in indices]
+
         # Store these as control points in the arch data
         arch_data['control_points'] = [
             {
@@ -580,7 +597,7 @@ class WorkflowManager:
             }
             for i, pt in enumerate(control_points)
         ]
-        
+
         return control_points
     
     # ============================================

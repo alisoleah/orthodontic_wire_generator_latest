@@ -448,6 +448,67 @@ class PyVistaVisualizer(QWidget):
                 name=f'cp_{i}'
             )
     
+    def enable_control_point_dragging(self):
+        """
+        Enable dragging of control points for hybrid mode.
+        Uses PyVista's sphere widget for interactive point manipulation.
+        """
+        if not self.control_points or len(self.control_points) == 0:
+            print("No control points to drag")
+            return
+
+        # Disable picking to avoid conflicts
+        try:
+            self.plotter.disable_picking()
+            self.picking_enabled = False
+        except:
+            pass
+
+        # Remove old static control point spheres (from display_editable_control_points)
+        for i in range(50):  # Remove up to 50 potential old spheres
+            try:
+                self.plotter.remove_actor(f'cp_{i}')
+            except:
+                pass
+
+        # Store widgets for later cleanup
+        if not hasattr(self, 'sphere_widgets'):
+            self.sphere_widgets = []
+
+        # Clear old widgets
+        for widget in self.sphere_widgets:
+            try:
+                widget.Off()
+            except:
+                pass
+        self.sphere_widgets = []
+
+        # Create draggable sphere widget for each control point
+        for i, point in enumerate(self.control_points):
+            def create_callback(index):
+                def callback(new_position):
+                    """Called when sphere is dragged"""
+                    # Convert to numpy array (sphere widget returns tuple)
+                    new_pos_array = np.array(new_position)
+                    # Update stored control point
+                    self.control_points[index] = new_pos_array
+                    # Emit signal to regenerate wire
+                    self.point_moved.emit(index, new_pos_array)
+                return callback
+
+            # Create sphere widget at control point
+            sphere_widget = self.plotter.add_sphere_widget(
+                create_callback(i),
+                center=point,
+                radius=1.5,
+                color='yellow',
+                style='surface'
+            )
+            self.sphere_widgets.append(sphere_widget)
+
+        print(f"Enabled dragging for {len(self.control_points)} control points")
+        self.interaction_mode_changed.emit('DRAG_POINTS')
+
     def set_interaction_mode(self, mode: str):
         """Set the interaction mode."""
         # Always disable picking first to avoid conflicts
@@ -456,13 +517,15 @@ class PyVistaVisualizer(QWidget):
             self.picking_enabled = False
         except:
             pass
-        
+
         if mode == 'DEFINE_PLANE' or mode == 'PLACE_POINTS':
             self.enable_point_picking()
+        elif mode == 'DRAG_POINTS':
+            self.enable_control_point_dragging()
         elif mode == 'VIEW':
             # Already disabled above
             pass
-        
+
         self.interaction_mode_changed.emit(mode)
     
     def set_jaw_rotation(self, angle: int):

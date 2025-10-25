@@ -490,11 +490,22 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
     def on_point_moved(self, index: int, new_position):
         """Handle point movement in visualizer and regenerate the wire."""
         try:
-            self.workflow_manager.update_control_point(index, new_position)
+            # Update both control point AND corresponding bracket position
+            arch_type = self.workflow_manager.get_active_arch()
+            arch_data = self.workflow_manager.get_active_arch_data()
+
+            self.workflow_manager.update_control_point(index, new_position, arch_type)
+
+            # Update bracket position too (hybrid mode uses brackets for wire generation)
+            if arch_data and 'bracket_positions' in arch_data:
+                brackets = arch_data['bracket_positions']
+                if 0 <= index < len(brackets):
+                    brackets[index]['position'] = new_position.copy()
+
             self.update_status(f"Control point {index + 1} moved")
 
             # Regenerate the wire to reflect the change in real-time
-            self.workflow_manager.generate_wire_from_control_points()
+            self.workflow_manager.generate_wire_from_control_points(arch_type)
             self.on_wire_generated()
 
         except Exception as e:

@@ -790,7 +790,13 @@ class EnhancedControlPanel(QWidget):
     
     def enable_point_dragging(self):
         """Enable dragging of control points"""
-        # This would set the visualizer to drag mode
+        # Get the main window's visualizer
+        main_window = self.parent().parent().parent()
+        visualizer = main_window.visualizer
+
+        # Enable dragging in the visualizer
+        visualizer.enable_control_point_dragging()
+
         self.enable_drag_btn.setText("Point Dragging Enabled ✓")
         self.enable_drag_btn.setStyleSheet("background-color: #90EE90;")
     

@@ -1,0 +1,78 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+nul
+
+# Project specific
+*.backup
+*.bak
+*.old
+*.tmp
+~*
+
+# Test outputs
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Logs
+*.log
+
+# Exports (optional - uncomment if you don't want to track exports)
+# exports/
+# *.gcode
+# *.ino
+
+# Temporary files
+*.swp
+*.swo
+*~
+.#*
+\#*#
+
+# Jupyter Notebooks (if used)
+.ipynb_checkpoints/
+*.ipynb
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Profiling
+*.prof
+*.lprof

@@ -375,6 +375,146 @@ Where:
 
 ---
 
+## 7. Recent Improvements (January 2025)
+
+### Wire Smoothness Enhancement
+
+**Problem**: Generated wires had visible angular segments and sharp corners, especially in the frontal teeth area.
+
+**Root Causes**:
+1. Insufficient interpolation points (100 points/segment was too low for 14 teeth)
+2. Intermediate control points had inward offset causing sharp corners
+3. Gaussian smoothing parameters were too conservative (sigma=6.0, 3 passes)
+
+**Solution Applied**:
+
+#### Files Modified:
+- `wire/wire_path_creator.py`
+- `gui/enhanced_control_panel.py`
+- `utils/catmull_rom.py`
+- `core/workflow_manager.py`
+
+#### Changes:
+
+**1. Increased Interpolation Resolution** (3x improvement):
+```python
+# Before: 100 points per control point segment
+self.path_resolution = 100
+
+# After: 300 points per control point segment (4200 total for 14 teeth)
+self.path_resolution = 300
+```
+
+**2. Removed Inward Offset** (eliminated sharp corners):
+```python
+# Before: Pushed intermediate points toward arch center
+interp_pos += direction_to_center * 1.5  # Caused sharp angles
+
+# After: Pure linear interpolation
+interp_pos = p1 + t * (p2 - p1)  # Smooth transitions
+```
+
+**3. Enhanced Gaussian Smoothing** (doubled smoothing strength):
+```python
+# Before:
+sigma = 6.0
+passes = 3
+
+# After:
+sigma = 12.0  # 2x stronger smoothing
+passes = 5     # 67% more smoothing iterations
+```
+
+**4. Manual Mode Enhancement**:
+Added intermediate points for 3-point manual design:
+```python
+# Expanded 3 points → 21 control points with 9 interpolations between each pair
+for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+    interp_pos = p1 + t * (p2 - p1)
+```
+
+**5. GUI Improvements**:
+- Slider maximum: 500 → 1000 points
+- Default value: 100 → 300 points
+- Silenced debug print spam in `workflow_manager.py`
+
+**Result**: Ultra-smooth orthodontic wires with no sharp angles in both automatic and manual modes.
+
+---
+
+### Hybrid Mode Interactive Dragging
+
+**Problem**: In hybrid mode, "Enable Point Dragging" button didn't actually enable dragging - points couldn't be moved, so wire couldn't be refined.
+
+**Root Cause**:
+- `PyVistaVisualizer` only implemented `enable_point_picking()` for adding points
+- No dragging functionality existed
+- `point_moved` signal was defined but never emitted
+- Control panel button only changed button color without enabling actual dragging
+
+**Solution Applied**:
+
+#### Files Modified:
+- `visualization/pyvista_visualizer.py`
+- `gui/enhanced_control_panel.py`
+
+#### Implementation:
+
+**1. Added Draggable Sphere Widgets**:
+```python
+def enable_control_point_dragging(self):
+    """Enable dragging using PyVista's sphere widget"""
+    for i, point in enumerate(self.control_points):
+        def create_callback(index):
+            def callback(new_position):
+                self.control_points[index] = new_position
+                self.point_moved.emit(index, new_position)  # Trigger wire regeneration
+            return callback
+
+        sphere_widget = self.plotter.add_sphere_widget(
+            create_callback(i),
+            center=point,
+            radius=1.5,
+            color='yellow'
+        )
+```
+
+**2. Connected Control Panel Button**:
+```python
+def enable_point_dragging(self):
+    main_window = self.parent().parent().parent()
+    visualizer = main_window.visualizer
+    visualizer.enable_control_point_dragging()  # Actually enable dragging
+```
+
+**3. Wire Regeneration on Drag**:
+```
+Sphere dragged → point_moved.emit() → on_point_moved() →
+update_control_point() + update bracket_positions →
+generate_wire_from_control_points() → Wire updates in real-time!
+```
+
+**Bug Fix - Wire Not Updating**: Dragging updated control points but not bracket positions.
+Solution: Update BOTH when sphere moved ([enhanced_main_window.py:500-503](gui/enhanced_main_window.py#L500-L503)):
+```python
+brackets[index]['position'] = new_position.copy()  # Wire uses brackets!
+```
+
+**Bug Fix - Only 6 Control Points**: Bracket positioner marks 8 back teeth as invisible.
+Solution: Extract ALL brackets ignoring 'visible' flag ([workflow_manager.py:581](core/workflow_manager.py#L581)):
+```python
+control_points = [b['position'].copy() for b in bracket_positions]  # All 14!
+```
+Hybrid mode detects 10+ points and uses them directly ([workflow_manager.py:354-363](core/workflow_manager.py#L354-L363)):
+```python
+if len(manual_points) >= 10:  # All 14 teeth
+    wire_path = self.wire_path_creator.create_smooth_path(bracket_list, arch_center)
+```
+
+**Result**: All 14 teeth with draggable spheres, full arch wire connects through all teeth and updates in real-time.
+
+---
+
 ## Future Enhancements
 
 ### Planned Improvements
@@ -385,5 +525,5 @@ Where:
 
 ---
 
-*Last Updated: 2025-01-12*
-*Version: 2.0.0*
+*Last Updated: 2025-01-13*
+*Version: 2.1.0*
