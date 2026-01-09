@@ -32,9 +32,11 @@ except ImportError:
     PYQT5_AVAILABLE = False
 
 from core.workflow_manager import WorkflowManager, WorkflowMode
-from gui.enhanced_control_panel import EnhancedControlPanel
+from gui.collapsible_control_panel import CollapsibleControlPanel
 from visualization.dual_arch_visualizer import DualArchVisualizer
 from gui.enhanced_status_panel import EnhancedStatusPanel
+from gui.styles.modern_light_theme import get_stylesheet
+from gui.styles.animations import FadeAnimation, PulseAnimation, StatusMessageAnimation
 
 
 class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
@@ -89,7 +91,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         main_layout.addWidget(splitter)
         
         # LEFT PANEL - Enhanced Control Panel
-        self.control_panel = EnhancedControlPanel(self.workflow_manager)
+        self.control_panel = CollapsibleControlPanel(self.workflow_manager)
         self.control_panel.setMinimumWidth(300)
         # Remove max width to allow resizing
         splitter.addWidget(self.control_panel)
@@ -106,8 +108,8 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.status_panel.setMinimumWidth(250)
         # Remove max width to allow resizing
         splitter.addWidget(self.status_panel)
-
-        # Set splitter proportions (control:visualizer:status = 2:5:2)
+        
+        # Set splitter proportions: 20% left, 60% center, 20% right
         splitter.setSizes([300, 900, 300])
 
         # Set stretch factors to make visualizer expand more
@@ -257,89 +259,8 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
     
     def setup_styling(self):
         """Setup application styling and theme"""
-        # Set application style
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f5f5f5;
-            }
-            
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 1ex;
-                padding-top: 10px;
-            }
-            
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-            
-            QPushButton {
-                background-color: #4CAF50;
-                border: none;
-                color: white;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 12px;
-                border-radius: 4px;
-            }
-            
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-            
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-            
-            QSlider::groove:horizontal {
-                border: 1px solid #bbb;
-                background: white;
-                height: 10px;
-                border-radius: 4px;
-            }
-            
-            QSlider::sub-page:horizontal {
-                background: #4CAF50;
-                border: 1px solid #777;
-                height: 10px;
-                border-radius: 4px;
-            }
-            
-            QSlider::handle:horizontal {
-                background: #4CAF50;
-                border: 1px solid #777;
-                width: 18px;
-                margin-top: -2px;
-                margin-bottom: -2px;
-                border-radius: 3px;
-            }
-            
-            QRadioButton::indicator {
-                width: 13px;
-                height: 13px;
-            }
-            
-            QRadioButton::indicator:unchecked {
-                border: 2px solid #cccccc;
-                border-radius: 7px;
-                background-color: white;
-            }
-            
-            QRadioButton::indicator:checked {
-                border: 2px solid #4CAF50;
-                border-radius: 7px;
-                background-color: #4CAF50;
-            }
-        """)
+        # Apply modern light theme
+        self.setStyleSheet(get_stylesheet())
     
     # ============================================
     # EVENT HANDLERS
