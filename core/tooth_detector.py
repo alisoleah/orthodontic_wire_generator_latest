@@ -208,3 +208,139 @@ class ToothDetector:
         
         return teeth
 
+
+    # ============================================
+    # PHASE 3: IMPROVED DETECTION METHODS
+    # ============================================
+    
+    def detect_overlaps(self, teeth: List[Dict]) -> List[tuple]:
+        """
+        Detect overlapping teeth (crowding).
+        
+        Returns list of (tooth1_idx, tooth2_idx, overlap_score) tuples
+        """
+        overlaps = []
+        
+        for i, tooth1 in enumerate(teeth):
+            for j, tooth2 in enumerate(teeth[i+1:], start=i+1):
+                # Calculate distance between tooth centers
+                dist = np.linalg.norm(tooth1['center'] - tooth2['center'])
+                
+                # If centers are very close, teeth likely overlap
+                if dist < 5.0:  # 5mm threshold
+                    overlap_score = 1.0 - (dist / 5.0)
+                    overlaps.append((i, j, overlap_score))
+        
+        return overlaps
+    
+    def detect_missing_teeth(self, teeth: List[Dict], expected_count: int = 14) -> List[Dict]:
+        """
+        Detect missing teeth by analyzing gaps in angular distribution.
+        
+        Returns list of dictionaries with 'position' and 'gap_size'
+        """
+        if len(teeth) >= expected_count:
+            return []  # No missing teeth
+        
+        # Calculate angular positions
+        angles = []
+        for tooth in teeth:
+            center = tooth['center']
+            angle = np.arctan2(center[1], center[0])  # Assuming XY plane
+            angles.append(np.degrees(angle) % 360)
+        
+        angles.sort()
+        
+        # Expected spacing between teeth
+        expected_spacing = 360.0 / expected_count
+        
+        # Find large gaps
+        missing = []
+        for i in range(len(angles)):
+            next_angle = angles[(i + 1) % len(angles)]
+            if i == len(angles) - 1:
+                gap = (360 - angles[i]) + angles[0]
+            else:
+                gap = next_angle - angles[i]
+            
+            # If gap is significantly larger than expected
+            if gap > expected_spacing * 1.5:
+                num_missing = int(round(gap / expected_spacing)) - 1
+                if num_missing > 0:
+                    missing.append({
+                        'position': (angles[i] + gap / 2) % 360,
+                        'gap_size': gap,
+                        'estimated_missing': num_missing
+                    })
+        
+        return missing
+    
+    def calculate_tooth_confidence(self, tooth: Dict) -> float:
+        """
+        Calculate detection confidence score (0-100%).
+        
+        Based on:
+        - Vertex count (more = better)
+        - Compactness (tighter cluster = better)
+        - Size (appropriate size = better)
+        """
+        # Vertex count score
+        vertex_count = len(tooth.get('vertices', []))
+        vertex_score = min(vertex_count / 1000.0, 1.0)  # Normalize to 1.0
+        
+        # Compactness score
+        if 'vertices' in tooth and 'center' in tooth:
+            vertices = tooth['vertices']
+            center = tooth['center']
+            distances = np.linalg.norm(vertices - center, axis=1)
+            std_dev = np.std(distances)
+            compactness_score = 1.0 / (1.0 + std_dev / 10.0)  # Normalize
+        else:
+            compactness_score = 0.5
+        
+        # Size score (teeth should be reasonable size)
+        if 'vertices' in tooth:
+            bbox_size = np.ptp(tooth['vertices'], axis=0)
+            avg_size = np.mean(bbox_size)
+            # Ideal tooth size is around 8-12mm
+            size_score = 1.0 - abs(avg_size - 10.0) / 10.0
+            size_score = max(0.0, min(1.0, size_score))
+        else:
+            size_score = 0.5
+        
+        # Combine scores
+        confidence = (vertex_score * 0.4 + compactness_score * 0.4 + size_score * 0.2) * 100
+        return max(0.0, min(100.0, confidence))
+    
+    def detect_tooth_rotation(self, tooth_vertices: np.ndarray) -> float:
+        """
+        Detect tooth rotation angle using PCA.
+        
+        Returns rotation angle in degrees (0 = no rotation)
+        """
+        if len(tooth_vertices) < 3:
+            return 0.0
+        
+        # Use only XY plane (ignore Z for rotation)
+        xy_vertices = tooth_vertices[:, :2]
+        
+        # Center the vertices
+        centered = xy_vertices - np.mean(xy_vertices, axis=0)
+        
+        # Calculate covariance matrix
+        cov_matrix = np.cov(centered.T)
+        
+        # Get eigenvectors (principal components)
+        eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
+        
+        # Principal axis is the eigenvector with largest eigenvalue
+        principal_idx = np.argmax(eigenvalues)
+        principal_axis = eigenvectors[:, principal_idx]
+        
+        # Calculate angle from expected orientation (AP axis = [0, 1])
+        expected_axis = np.array([0, 1])
+        cos_angle = np.dot(principal_axis, expected_axis)
+        rotation_angle = np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
+        
+        # Return absolute rotation (0-90 degrees)
+        return min(rotation_angle, 180 - rotation_angle)
