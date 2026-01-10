@@ -374,23 +374,23 @@ class WirePathCreator:
 
         return smoothed_path
 
-    def _apply_gaussian_smoothing(self, path: np.ndarray, sigma: float = 12.0) -> np.ndarray:
+    def _apply_gaussian_smoothing(self, path: np.ndarray, sigma: float = 3.0) -> np.ndarray:
         """
-        Apply MAXIMUM Gaussian smoothing for perfectly smooth curves.
+        Apply moderate Gaussian smoothing for clinically accurate curves.
 
         Algorithm:
-        1. Apply very strong Gaussian filter (sigma=12.0)
-        2. Apply MULTIPLE passes (5 times) for extra smoothness
-        3. No endpoint preservation - full smoothing everywhere
+        1. Apply moderate Gaussian filter (sigma=3.0) - REDUCED from 12.0
+        2. Apply 2 passes (REDUCED from 5) for balanced smoothness
+        3. Preserves tooth-following accuracy while maintaining smooth curves
 
-        This creates the smoothest possible wire at the cost of slight deviation from brackets.
+        This creates clinically accurate wire paths that follow teeth closely.
 
         Args:
             path: Wire path points (Nx3 array)
-            sigma: Gaussian kernel standard deviation (12.0 = maximum smoothness)
+            sigma: Gaussian kernel standard deviation (3.0 = clinical balance)
 
         Returns:
-            Maximum-smoothed wire path with NO sharp edges
+            Smoothed wire path that follows teeth accurately
         """
         from scipy.ndimage import gaussian_filter1d
 
@@ -401,13 +401,13 @@ class WirePathCreator:
 
         # Apply Gaussian filter to each dimension
         for dim in range(3):  # X, Y, Z
-            # Apply smoothing 5 times for maximum effect
+            # Apply smoothing 2 times for balanced effect (REDUCED from 5)
             temp = path[:, dim].copy()
 
-            for pass_num in range(5):  # 5 passes of smoothing
+            for pass_num in range(2):  # 2 passes (was 5)
                 temp = gaussian_filter1d(
                     temp,
-                    sigma=sigma,  # Maximum sigma = 12.0
+                    sigma=sigma,  # Moderate sigma = 3.0 (was 12.0)
                     mode='nearest'
                 )
 

@@ -33,16 +33,20 @@ TOOTH_TYPES = {
 }
 
 # Clinical parameters
+# Bracket heights adjusted per arch for better positioning
+# Upper arch: Lower values (wire closer to teeth)
+# Lower arch: Lower values (wire closer to teeth)
 BRACKET_HEIGHTS = {
-    'incisor': 3.5,   # mm from gum line
-    'canine': 4.0,
-    'premolar': 4.5,
-    'molar': 5.0
+    'incisor': 2.5,   # mm from gum line (REDUCED from 3.5)
+    'canine': 3.0,    # mm from gum line (REDUCED from 4.0)
+    'premolar': 3.5,  # mm from gum line (REDUCED from 4.5)
+    'molar': 4.0,     # mm from gum line (REDUCED from 5.0)
+    'posterior': 3.5  # Default for unclassified posterior teeth
 }
 
 CLINICAL_OFFSETS = {
-    'lingual': 2.0,   # mm inward from tooth surface
-    'labial': 1.5     # mm outward from tooth surface
+    'lingual': 1.5,   # mm inward from tooth surface (REDUCED from 2.0)
+    'labial': 1.2     # mm outward from tooth surface (REDUCED from 1.5)
 }
 
 
