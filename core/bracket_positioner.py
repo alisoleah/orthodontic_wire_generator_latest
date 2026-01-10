@@ -48,10 +48,18 @@ class BracketPositioner:
         
         # Calculate target height on tooth
         height_axis = 2  # Typically Z-axis
+        
+        # ARCH-SPECIFIC POSITIONING (CRITICAL FIX)
         if arch_type == 'upper':
-            target_height = np.min(tooth_vertices[:, height_axis]) + bracket_height
+            # Upper arch: Position wire LOWER (more gingival) to avoid collision
+            # Use minimum height + larger offset to move wire down
+            min_height = np.min(tooth_vertices[:, height_axis])
+            target_height = min_height + bracket_height + 2.0  # +2mm extra clearance
         else:
-            target_height = np.max(tooth_vertices[:, height_axis]) - bracket_height
+            # Lower arch: Position wire HIGHER (more occlusal) to avoid collision
+            # Use maximum height - larger offset to move wire up
+            max_height = np.max(tooth_vertices[:, height_axis])
+            target_height = max_height - bracket_height - 2.0  # -2mm extra clearance
         
         # Find bracket position on lingual surface
         bracket_pos = self._find_lingual_position(
@@ -61,8 +69,10 @@ class BracketPositioner:
         # Calculate surface normal
         normal = self._calculate_surface_normal(tooth_center, arch_center)
         
-        # Apply clinical offset
-        bracket_pos = bracket_pos + normal * self.clinical_offset
+        # Apply REDUCED clinical offset for better tooth contact
+        # Reduced from 1.5mm to 0.8mm for tighter fit
+        reduced_offset = 0.8  # mm (was 1.5mm)
+        bracket_pos = bracket_pos + normal * reduced_offset
         
         # Determine visibility (only frontal teeth get brackets: incisors and canines)
         visible = tooth_type in ['incisor', 'canine']
