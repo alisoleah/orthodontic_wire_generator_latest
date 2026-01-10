@@ -627,4 +627,57 @@ class PyVistaVisualizer(QWidget):
     
     def reset_camera(self):
         """Reset camera to default view."""
-        self.plotter.reset_camera()
+        self.plotter.reset_camera()    
+    def set_camera_preset(self, preset: str):
+        """
+        Set camera to a preset clinical view.
+        
+        Args:
+            preset: One of 'front', 'side', 'top', 'oblique'
+        """
+        presets = {
+            'front': {
+                'position': (0, -150, 0),
+                'focal_point': (0, 0, 0),
+                'viewup': (0, 0, 1)
+            },
+            'side': {
+                'position': (150, 0, 0),
+                'focal_point': (0, 0, 0),
+                'viewup': (0, 0, 1)
+            },
+            'top': {
+                'position': (0, 0, 150),
+                'focal_point': (0, 0, 0),
+                'viewup': (0, 1, 0)
+            },
+            'oblique': {
+                'position': (100, -100, 80),
+                'focal_point': (0, 0, 0),
+                'viewup': (0, 0, 1)
+            }
+        }
+        
+        if preset in presets:
+            self.plotter.camera_position = [
+                presets[preset]['position'],
+                presets[preset]['focal_point'],
+                presets[preset]['viewup']
+            ]
+            self.plotter.render()
+    
+    def camera_front_view(self):
+        """Set camera to front (anterior) view"""
+        self.set_camera_preset('front')
+    
+    def camera_side_view(self):
+        """Set camera to side (lateral) view"""
+        self.set_camera_preset('side')
+    
+    def camera_top_view(self):
+        """Set camera to top (occlusal) view"""
+        self.set_camera_preset('top')
+    
+    def camera_oblique_view(self):
+        """Set camera to 3D oblique view"""
+        self.set_camera_preset('oblique')

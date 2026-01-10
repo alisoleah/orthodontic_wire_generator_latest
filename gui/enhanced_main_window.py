@@ -34,7 +34,7 @@ except ImportError:
 from core.workflow_manager import WorkflowManager, WorkflowMode
 from gui.collapsible_control_panel import CollapsibleControlPanel
 from visualization.dual_arch_visualizer import DualArchVisualizer
-from gui.enhanced_status_panel import EnhancedStatusPanel
+from gui.enhanced_status_panel_v2 import EnhancedStatusPanelV2
 from gui.styles.modern_light_theme import get_stylesheet
 from gui.styles.animations import FadeAnimation, PulseAnimation, StatusMessageAnimation
 
@@ -104,7 +104,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         splitter.addWidget(self.visualizer)
 
         # RIGHT PANEL - Status and Information
-        self.status_panel = EnhancedStatusPanel()
+        self.status_panel = EnhancedStatusPanelV2()
         self.status_panel.setMinimumWidth(250)
         # Remove max width to allow resizing
         splitter.addWidget(self.status_panel)
@@ -116,6 +116,9 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         splitter.setStretchFactor(0, 1)  # Control panel
         splitter.setStretchFactor(1, 3)  # Visualizer (gets most space)
         splitter.setStretchFactor(2, 1)  # Status panel
+        
+        # Setup keyboard shortcuts
+        self.setup_keyboard_shortcuts()
 
         # Create menu bar
         self.create_menu_bar()
