@@ -64,7 +64,6 @@ class WirePathCreator:
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
         # Step 3: Extract bracket positions directly (no intermediate sampling)
-        # The surface sampling was causing gum-level paths by projecting to inter-dental valleys
         positions = np.array([b['position'] for b in sorted_brackets])
         
         # Step 4: Generate smooth path using Catmull-Rom spline through brackets
@@ -74,10 +73,52 @@ class WirePathCreator:
         if height_offset != 0.0:
             self.wire_path[:, 2] += height_offset
         
-        # Step 6: Validate and clean the path (no smoothing - let spline define shape)
+        # Step 6: COLLISION DETECTION - push penetrating points outward
+        self.wire_path = self._apply_collision_detection(self.wire_path, arch_center)
+        
+        # Step 7: Validate and clean the path
         self.wire_path = self._validate_and_clean_path()
         
         return self.wire_path
+    
+    def _apply_collision_detection(self, wire_path: np.ndarray, 
+                                   arch_center: np.ndarray) -> np.ndarray:
+        """
+        Check wire path for collision with teeth and push outward.
+        
+        For each point, if it's too close to the arch center (inside teeth),
+        push it outward toward the lingual surface.
+        """
+        if len(wire_path) == 0:
+            return wire_path
+        
+        corrected_path = wire_path.copy()
+        
+        # Calculate average radius of brackets from center (this is the target surface)
+        horizontal_wire = wire_path[:, :2]  # X-Y only
+        center_2d = arch_center[:2]
+        
+        distances = np.linalg.norm(horizontal_wire - center_2d, axis=1)
+        target_radius = np.percentile(distances, 75)  # Use 75th percentile as target
+        
+        # For each point, ensure it's not inside the teeth
+        for i in range(len(wire_path)):
+            point_2d = wire_path[i, :2]
+            dist_to_center = np.linalg.norm(point_2d - center_2d)
+            
+            # If point is too close to center (inside teeth), push outward
+            if dist_to_center < target_radius * 0.95:  # 5% margin
+                # Direction from center to point
+                direction = point_2d - center_2d
+                if np.linalg.norm(direction) > 0:
+                    direction = direction / np.linalg.norm(direction)
+                else:
+                    direction = np.array([1, 0])
+                
+                # Push point to target radius
+                corrected_path[i, :2] = center_2d + direction * target_radius
+        
+        return corrected_path
     
     def _sort_brackets_by_angle(self, brackets: List[Dict], 
                                center: np.ndarray) -> List[Dict]:
