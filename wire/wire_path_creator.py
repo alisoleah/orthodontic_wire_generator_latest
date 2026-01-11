@@ -63,15 +63,15 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: Extract bracket positions
-        positions = np.array([b['position'] for b in sorted_brackets])
+        # Step 3: Generate wire that follows tooth contours
+        # This creates control points that trace along the lingual surface
+        contour_points = self._generate_tooth_contour_points(sorted_brackets, arch_center)
         
-        # Step 4: Generate wire with VISIBLE BENDS at brackets (not smooth spline)
-        # Professional lingual wires have distinct bends at each bracket
-        self.wire_path = self._generate_angular_wire_path(positions)
+        # Step 4: Generate wire through contour points with tension for bends
+        self.wire_path = self._generate_angular_wire_path(contour_points)
         
-        # Step 5: Apply height offset (move wire down by default)
-        default_height_offset = -1.5  # Move down 1.5mm for better position
+        # Step 5: Apply height offset (adjusted for better initial position)
+        default_height_offset = 0.5  # Slight upward adjustment
         total_offset = height_offset + default_height_offset
         if total_offset != 0.0:
             self.wire_path[:, 2] += total_offset
@@ -83,6 +83,43 @@ class WirePathCreator:
         self.wire_path = self._validate_and_clean_path()
         
         return self.wire_path
+    
+    def _generate_tooth_contour_points(self, sorted_brackets: List[Dict], 
+                                       arch_center: np.ndarray) -> np.ndarray:
+        """
+        Generate control points that follow tooth contours.
+        
+        Instead of just connecting brackets, this adds points at each tooth's
+        lingual surface to create a wire that follows the arch contour.
+        """
+        all_points = []
+        
+        for i, bracket in enumerate(sorted_brackets):
+            # Add bracket position
+            all_points.append(bracket['position'].copy())
+            
+            # Add intermediate point between this and next bracket (if not last)
+            if i < len(sorted_brackets) - 1:
+                next_bracket = sorted_brackets[i + 1]
+                
+                # Midpoint between brackets
+                mid_pos = (bracket['position'] + next_bracket['position']) / 2
+                
+                # Calculate direction TOWARD center (lingual direction)
+                direction_to_center = arch_center[:2] - mid_pos[:2]
+                dist = np.linalg.norm(direction_to_center)
+                
+                if dist > 0:
+                    direction_to_center = direction_to_center / dist
+                    
+                    # Push midpoint INWARD toward lingual surface
+                    # This creates the contour-following effect
+                    inward_offset = 1.2  # mm inward to follow tooth contour
+                    mid_pos[:2] = mid_pos[:2] + direction_to_center * inward_offset
+                
+                all_points.append(mid_pos)
+        
+        return np.array(all_points)
     
     def _generate_angular_wire_path(self, positions: np.ndarray) -> np.ndarray:
         """
