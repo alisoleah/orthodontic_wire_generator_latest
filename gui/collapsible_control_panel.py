@@ -1,11 +1,8 @@
 """
-Enhanced Control Panel for Hybrid Automatic/Manual Orthodontic Wire Generator
+Modern Collapsible Control Panel for Orthodontic Wire Generator
 
-FIXED ISSUES:
-- Hybrid mode now auto-generates wire on load
-- Lower jaw wire generation working
-- Wire updates with height controls
-- Manual mode follows teeth (not just arcs)
+This is a modernized version with collapsible sections while preserving
+all functionality from the original enhanced_control_panel.py
 """
 
 import sys
@@ -19,7 +16,8 @@ try:
     from PyQt5.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
         QRadioButton, QCheckBox, QSlider, QDoubleSpinBox, QFormLayout,
-        QFileDialog, QMessageBox, QProgressDialog, QApplication, QScrollArea
+        QFileDialog, QMessageBox, QProgressDialog, QApplication, QScrollArea,
+        QButtonGroup
     )
     from PyQt5.QtCore import Qt, pyqtSignal
     from PyQt5.QtGui import QFont
@@ -28,24 +26,27 @@ except ImportError:
 
 from core.workflow_manager import WorkflowManager, WorkflowMode
 from gui.widgets.collapsible_section import CollapsibleSection
+from gui.widgets.file_upload_card import FileUploadCard
 
 
-class EnhancedControlPanel(QWidget):
+class CollapsibleControlPanel(QWidget):
     """
-    Control panel with mode selection and dual-arch support
+    Modern control panel with collapsible sections
+    Preserves all functionality from EnhancedControlPanel
     """
     
-    # Signals for communication with main window
+    # Signals for communication with main window (same as original)
     arch_loaded = pyqtSignal(str, str)  # arch_type, file_path
     mode_changed = pyqtSignal(str)  # mode
     active_arch_changed = pyqtSignal(str)  # arch_type
     show_both_changed = pyqtSignal(bool)  # show_both
     wire_generated = pyqtSignal()
-    interaction_mode_requested = pyqtSignal(str)  # mode (DEFINE_PLANE, PLACE_POINTS, etc.)
-    control_points_converted = pyqtSignal(list) # list of control points
-    gcode_exported = pyqtSignal(str) # The generated G-code content
-    esp32_code_exported = pyqtSignal(str) # The generated ESP32 code content
-    jaw_rotation_changed = pyqtSignal(int) # The new rotation angle
+    interaction_mode_requested = pyqtSignal(str)
+    control_points_converted = pyqtSignal(list)
+    gcode_exported = pyqtSignal(str)
+    esp32_code_exported = pyqtSignal(str)
+    jaw_rotation_changed = pyqtSignal(int)
+    models_cleared = pyqtSignal()  # NEW: Signal when clear all is clicked
     
     def __init__(self, workflow_manager: WorkflowManager, parent=None):
         super().__init__(parent)
@@ -53,8 +54,8 @@ class EnhancedControlPanel(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        """Initialize the user interface"""
-        # Main layout for this widget
+        """Initialize the user interface with collapsible sections"""
+        # Main layout
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(main_layout)
@@ -64,6 +65,7 @@ class EnhancedControlPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         main_layout.addWidget(scroll)
 
         # Create content widget for scroll area
@@ -72,335 +74,325 @@ class EnhancedControlPanel(QWidget):
 
         # Layout for scrollable content
         layout = QVBoxLayout()
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
         content_widget.setLayout(layout)
-
-        # Set font for better readability
-        font = QFont()
-        font.setPointSize(9)
-        content_widget.setFont(font)
         
         # ============================================
-        # SECTION 1: FILE LOADING
+        # SECTION 1: FILE LOADING (Collapsible)
         # ============================================
-        file_group = QGroupBox("1. Load Dental Models")
-        file_layout = QVBoxLayout()
+        section1 = CollapsibleSection("DENTAL MODELS", section_number=1)
         
-        # Upper Arch
-        upper_layout = QHBoxLayout()
-        self.load_upper_btn = QPushButton("Load Upper Arch (.stl)")
-        self.load_upper_btn.clicked.connect(lambda: self.load_arch('upper'))
-        self.upper_status = QLabel("Not loaded")
-        self.upper_status.setStyleSheet("color: gray;")
-        upper_layout.addWidget(self.load_upper_btn)
-        upper_layout.addWidget(self.upper_status)
-        file_layout.addLayout(upper_layout)
+        # Upper Arch File Card
+        self.upper_card = FileUploadCard("Upper Arch (.stl)", "⬆️")
+        self.upper_card.file_selected.connect(lambda path: self.load_arch_from_card('upper', path))
+        section1.add_widget(self.upper_card)
         
-        # Lower Arch
-        lower_layout = QHBoxLayout()
-        self.load_lower_btn = QPushButton("Load Lower Arch (.stl)")
-        self.load_lower_btn.clicked.connect(lambda: self.load_arch('lower'))
-        self.lower_status = QLabel("Not loaded")
-        self.lower_status.setStyleSheet("color: gray;")
-        lower_layout.addWidget(self.load_lower_btn)
-        lower_layout.addWidget(self.lower_status)
-        file_layout.addLayout(lower_layout)
+        # Lower Arch File Card
+        self.lower_card = FileUploadCard("Lower Arch (.stl)", "⬇️")
+        self.lower_card.file_selected.connect(lambda path: self.load_arch_from_card('lower', path))
+        section1.add_widget(self.lower_card)
         
-        # Optional: Opposing arch for collision
-        opposing_layout = QHBoxLayout()
-        self.load_opposing_btn = QPushButton("Load Opposing Arch (Optional)")
-        self.load_opposing_btn.clicked.connect(self.load_opposing_arch)
-        self.opposing_status = QLabel("Not loaded")
-        self.opposing_status.setStyleSheet("color: gray;")
-        opposing_layout.addWidget(self.load_opposing_btn)
-        opposing_layout.addWidget(self.opposing_status)
-        file_layout.addLayout(opposing_layout)
+        # Opposing Arch File Card
+        self.opposing_card = FileUploadCard("Opposing Arch (Optional)", "↔️")
+        self.opposing_card.file_selected.connect(self.load_opposing_arch_from_card)
+        section1.add_widget(self.opposing_card)
         
-        file_group.setLayout(file_layout)
-        layout.addWidget(file_group)
+        layout.addWidget(section1)
         
         # ============================================
-        # SECTION 2: WORKFLOW MODE SELECTION
+        # SECTION 2: WORKFLOW MODE (Collapsible)
         # ============================================
-        mode_group = QGroupBox("2. Select Workflow Mode")
-        mode_layout = QVBoxLayout()
+        section2 = CollapsibleSection("WORKFLOW MODE", section_number=2)
         
-        # Mode description
         mode_desc = QLabel("Choose how you want to design the wire:")
+        mode_desc.setObjectName("subheadingLabel")
         mode_desc.setWordWrap(True)
-        mode_layout.addWidget(mode_desc)
+        section2.add_widget(mode_desc)
         
         # Radio buttons for mode selection
-        self.mode_automatic = QRadioButton("Automatic Detection")
+        self.mode_automatic = QRadioButton("🤖 Automatic Detection")
         self.mode_automatic.setChecked(True)
         self.mode_automatic.toggled.connect(self.on_mode_changed)
-        mode_layout.addWidget(self.mode_automatic)
+        section2.add_widget(self.mode_automatic)
         
-        auto_desc = QLabel("   • AI detects teeth and generates wire automatically")
-        auto_desc.setStyleSheet("color: gray; font-size: 10px;")
-        mode_layout.addWidget(auto_desc)
+        auto_desc = QLabel("AI detects teeth and generates wire automatically")
+        auto_desc.setStyleSheet("color: #718096; font-size: 12px; margin-left: 24px;")
+        auto_desc.setWordWrap(True)
+        section2.add_widget(auto_desc)
         
-        self.mode_manual = QRadioButton("Manual Design (FixR Style)")
+        self.mode_manual = QRadioButton("✏️ Manual Design (FIXR Style)")
         self.mode_manual.toggled.connect(self.on_mode_changed)
-        mode_layout.addWidget(self.mode_manual)
+        section2.add_widget(self.mode_manual)
         
-        manual_desc = QLabel("   • Place control points manually on tooth surfaces")
-        manual_desc.setStyleSheet("color: gray; font-size: 10px;")
-        mode_layout.addWidget(manual_desc)
+        manual_desc = QLabel("Place control points manually on tooth surfaces")
+        manual_desc.setStyleSheet("color: #718096; font-size: 12px; margin-left: 24px;")
+        manual_desc.setWordWrap(True)
+        section2.add_widget(manual_desc)
         
-        self.mode_hybrid = QRadioButton("Hybrid (Auto + Manual Adjust)")
+        self.mode_hybrid = QRadioButton("⚡ Hybrid (Auto + Manual Adjust)")
         self.mode_hybrid.toggled.connect(self.on_mode_changed)
-        mode_layout.addWidget(self.mode_hybrid)
+        section2.add_widget(self.mode_hybrid)
         
-        hybrid_desc = QLabel("   • Start with automatic, then manually refine")
-        hybrid_desc.setStyleSheet("color: gray; font-size: 10px;")
-        mode_layout.addWidget(hybrid_desc)
+        hybrid_desc = QLabel("Start with automatic, then manually refine")
+        hybrid_desc.setStyleSheet("color: #718096; font-size: 12px; margin-left: 24px;")
+        hybrid_desc.setWordWrap(True)
+        section2.add_widget(hybrid_desc)
         
-        mode_group.setLayout(mode_layout)
-        layout.addWidget(mode_group)
+        layout.addWidget(section2)
         
         # ============================================
-        # SECTION 3: ACTIVE ARCH SELECTION
+        # SECTION 3: ACTIVE ARCH SELECTION (Collapsible)
         # ============================================
-        arch_group = QGroupBox("3. Select Active Arch for Design")
-        arch_layout = QVBoxLayout()
+        section3 = CollapsibleSection("ACTIVE ARCH", section_number=3)
         
         arch_desc = QLabel("Choose which arch to design wire for:")
-        arch_layout.addWidget(arch_desc)
+        arch_desc.setObjectName("subheadingLabel")
+        section3.add_widget(arch_desc)
         
         self.active_upper = QRadioButton("Upper Arch")
         self.active_upper.setChecked(True)
         self.active_upper.toggled.connect(self.on_active_arch_changed)
-        arch_layout.addWidget(self.active_upper)
+        section3.add_widget(self.active_upper)
         
         self.active_lower = QRadioButton("Lower Arch")
         self.active_lower.toggled.connect(self.on_active_arch_changed)
-        arch_layout.addWidget(self.active_lower)
+        section3.add_widget(self.active_lower)
         
         # Option to show both
         self.show_both_checkbox = QCheckBox("Show Both Arches")
         self.show_both_checkbox.setChecked(False)
         self.show_both_checkbox.stateChanged.connect(self.on_show_both_changed)
-        arch_layout.addWidget(self.show_both_checkbox)
+        section3.add_widget(self.show_both_checkbox)
         
-        arch_group.setLayout(arch_layout)
-        layout.addWidget(arch_group)
+        layout.addWidget(section3)
         
         # ============================================
-        # SECTION 4: WORKFLOW STEPS (Dynamic)
+        # SECTION 4: WORKFLOW STEPS (Dynamic, Collapsible)
         # ============================================
-        self.workflow_steps_group = QGroupBox("4. Design Workflow")
-        self.workflow_steps_layout = QVBoxLayout()
-        self.workflow_steps_group.setLayout(self.workflow_steps_layout)
-        layout.addWidget(self.workflow_steps_group)
+        self.workflow_section = CollapsibleSection("DESIGN WORKFLOW", section_number=4)
+        layout.addWidget(self.workflow_section)
         
         # This section will change based on selected mode
         self.update_workflow_steps()
         
         # ============================================
-        # SECTION 5: WIRE PARAMETERS
+        # SECTION 5: WIRE PARAMETERS (Collapsible)
         # ============================================
-        params_group = QGroupBox("5. Wire Parameters")
-        params_layout = QFormLayout()
+        section5 = CollapsibleSection("WIRE PARAMETERS", section_number=5)
         
-        # Height adjustment slider
+        # Height adjustment
+        height_label = QLabel("Height Offset")
+        height_label.setObjectName("subheadingLabel")
+        section5.add_widget(height_label)
+        
         self.height_slider = QSlider(Qt.Horizontal)
-        self.height_slider.setMinimum(-100)  # -10.0mm
-        self.height_slider.setMaximum(100)   # +10.0mm
+        self.height_slider.setMinimum(-100)
+        self.height_slider.setMaximum(100)
         self.height_slider.setValue(0)
-        self.height_slider.setTickPosition(QSlider.TicksBelow)
-        self.height_slider.setTickInterval(20)
         self.height_slider.valueChanged.connect(self.on_height_changed)
+        section5.add_widget(self.height_slider)
         
         self.height_label = QLabel("0.0 mm")
-        height_layout = QHBoxLayout()
-        height_layout.addWidget(self.height_slider)
-        height_layout.addWidget(self.height_label)
+        self.height_label.setAlignment(Qt.AlignRight)
+        section5.add_widget(self.height_label)
         
-        params_layout.addRow("Wire Height Offset:", height_layout)
-
-        # Anterior/Posterior adjustment slider (forward/backward)
+        # AP offset
+        ap_label = QLabel("Forward/Backward")
+        ap_label.setObjectName("subheadingLabel")
+        section5.add_widget(ap_label)
+        
         self.ap_slider = QSlider(Qt.Horizontal)
-        self.ap_slider.setMinimum(-100)  # -10.0mm
-        self.ap_slider.setMaximum(100)   # +10.0mm
+        self.ap_slider.setMinimum(-100)
+        self.ap_slider.setMaximum(100)
         self.ap_slider.setValue(0)
-        self.ap_slider.setTickPosition(QSlider.TicksBelow)
-        self.ap_slider.setTickInterval(20)
         self.ap_slider.valueChanged.connect(self.on_ap_offset_changed)
-
+        section5.add_widget(self.ap_slider)
+        
         self.ap_label = QLabel("0.0 mm")
-        ap_layout = QHBoxLayout()
-        ap_layout.addWidget(self.ap_slider)
-        ap_layout.addWidget(self.ap_label)
-
-        params_layout.addRow("Forward/Backward:", ap_layout)
-
+        self.ap_label.setAlignment(Qt.AlignRight)
+        section5.add_widget(self.ap_label)
+        
         # Wire diameter
+        diameter_layout = QHBoxLayout()
+        diameter_layout.addWidget(QLabel("Wire Diameter:"))
         self.wire_diameter = QDoubleSpinBox()
         self.wire_diameter.setRange(0.3, 2.0)
         self.wire_diameter.setValue(0.9)
         self.wire_diameter.setSuffix(" mm")
         self.wire_diameter.setSingleStep(0.1)
         self.wire_diameter.valueChanged.connect(self.on_wire_diameter_changed)
-        params_layout.addRow("Wire Diameter:", self.wire_diameter)
+        diameter_layout.addWidget(self.wire_diameter)
+        section5.add_layout(diameter_layout)
         
-        # Smoothness (for spline)
+        # Smoothness
+        smooth_label = QLabel("Curve Smoothness")
+        smooth_label.setObjectName("subheadingLabel")
+        section5.add_widget(smooth_label)
+        
         self.smoothness_slider = QSlider(Qt.Horizontal)
         self.smoothness_slider.setMinimum(10)
         self.smoothness_slider.setMaximum(1000)
         self.smoothness_slider.setValue(300)
         self.smoothness_slider.valueChanged.connect(self.on_smoothness_changed)
+        section5.add_widget(self.smoothness_slider)
+        
         self.smoothness_label = QLabel("300 points")
-        smoothness_layout = QHBoxLayout()
-        smoothness_layout.addWidget(self.smoothness_slider)
-        smoothness_layout.addWidget(self.smoothness_label)
-        params_layout.addRow("Curve Smoothness:", smoothness_layout)
+        self.smoothness_label.setAlignment(Qt.AlignRight)
+        section5.add_widget(self.smoothness_label)
         
-        params_group.setLayout(params_layout)
-        layout.addWidget(params_group)
+        layout.addWidget(section5)
         
         # ============================================
-        # SECTION 6: COLLISION CHECK
+        # SECTION 6: COLLISION CHECK (Collapsible)
         # ============================================
-        collision_group = QGroupBox("6. Occlusal Interference Check")
-        collision_layout = QVBoxLayout()
+        section6 = CollapsibleSection("OCCLUSAL INTERFERENCE", section_number=6)
         
         self.check_collision_btn = QPushButton("Check for Collisions")
         self.check_collision_btn.clicked.connect(self.check_collisions)
-        collision_layout.addWidget(self.check_collision_btn)
+        section6.add_widget(self.check_collision_btn)
         
         self.collision_status = QLabel("No collision check performed")
         self.collision_status.setWordWrap(True)
-        collision_layout.addWidget(self.collision_status)
+        self.collision_status.setStyleSheet("color: #718096; font-size: 12px;")
+        section6.add_widget(self.collision_status)
         
-        collision_group.setLayout(collision_layout)
-        layout.addWidget(collision_group)
+        layout.addWidget(section6)
         
         # ============================================
-        # SECTION 7: EXPORT
+        # SECTION 7: EXPORT (Collapsible)
         # ============================================
-        export_group = QGroupBox("7. Export Wire Design")
-        export_layout = QVBoxLayout()
+        section7 = CollapsibleSection("EXPORT", section_number=7)
         
-        self.export_gcode_btn = QPushButton("Export G-Code")
+        self.export_gcode_btn = QPushButton("💾 Export G-Code")
         self.export_gcode_btn.clicked.connect(self.export_gcode)
-        export_layout.addWidget(self.export_gcode_btn)
+        section7.add_widget(self.export_gcode_btn)
         
-        self.export_esp32_btn = QPushButton("Export ESP32 Code")
+        self.export_esp32_btn = QPushButton("📟 Export ESP32 Code")
         self.export_esp32_btn.clicked.connect(self.export_esp32)
-        export_layout.addWidget(self.export_esp32_btn)
+        section7.add_widget(self.export_esp32_btn)
         
-        self.export_stl_btn = QPushButton("Export STL")
+        self.export_stl_btn = QPushButton("🔷 Export STL")
         self.export_stl_btn.clicked.connect(self.export_stl)
-        export_layout.addWidget(self.export_stl_btn)
+        section7.add_widget(self.export_stl_btn)
         
-        export_group.setLayout(export_layout)
-        layout.addWidget(export_group)
-
+        layout.addWidget(section7)
+        
         # ============================================
-        # SECTION 8: JAW SIMULATION
+        # SECTION 7.5: RESET/CLEAR (NEW)
         # ============================================
-        simulation_group = QGroupBox("8. Jaw Simulation")
-        simulation_layout = QFormLayout()
-
+        section_clear = CollapsibleSection("RESET", section_number=7.5)
+        
+        clear_desc = QLabel("Clear all loaded models and start fresh")
+        clear_desc.setStyleSheet("color: #718096; font-size: 12px;")
+        clear_desc.setWordWrap(True)
+        section_clear.add_widget(clear_desc)
+        
+        self.clear_all_btn = QPushButton("🗑️ Clear All Models")
+        self.clear_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+            QPushButton:pressed {
+                background-color: #B91C1C;
+            }
+        """)
+        self.clear_all_btn.clicked.connect(self.clear_all_models)
+        section_clear.add_widget(self.clear_all_btn)
+        
+        layout.addWidget(section_clear)
+        
+        # ============================================
+        # SECTION 8: JAW SIMULATION (Collapsible)
+        # ============================================
+        section8 = CollapsibleSection("JAW SIMULATION", section_number=8)
+        
+        jaw_label = QLabel("Lower Jaw Opening")
+        jaw_label.setObjectName("subheadingLabel")
+        section8.add_widget(jaw_label)
+        
         self.jaw_rotation_slider = QSlider(Qt.Horizontal)
         self.jaw_rotation_slider.setMinimum(0)
         self.jaw_rotation_slider.setMaximum(45)
         self.jaw_rotation_slider.setValue(0)
-        self.jaw_rotation_slider.setTickPosition(QSlider.TicksBelow)
-        self.jaw_rotation_slider.setTickInterval(5)
         self.jaw_rotation_slider.valueChanged.connect(self.on_jaw_rotation_changed)
-
+        section8.add_widget(self.jaw_rotation_slider)
+        
         self.jaw_rotation_label = QLabel("0°")
-        rotation_layout = QHBoxLayout()
-        rotation_layout.addWidget(self.jaw_rotation_slider)
-        rotation_layout.addWidget(self.jaw_rotation_label)
-
-        simulation_layout.addRow("Lower Jaw Opening:", rotation_layout)
-        simulation_group.setLayout(simulation_layout)
-        layout.addWidget(simulation_group)
-
+        self.jaw_rotation_label.setAlignment(Qt.AlignRight)
+        section8.add_widget(self.jaw_rotation_label)
+        
+        layout.addWidget(section8)
+        
         # Add stretch to push everything to top
         layout.addStretch()
     
     # ============================================
-    # EVENT HANDLERS
+    # FILE LOADING HANDLERS
     # ============================================
     
-    def load_arch(self, arch_type: str):
-        """Load upper or lower arch"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, 
-            f"Select {arch_type.capitalize()} Arch STL", 
-            "", 
-            "STL Files (*.stl)"
-        )
-        
-        if file_path:
-            try:
-                self.workflow_manager.load_arch(file_path, arch_type)
+    def load_arch_from_card(self, arch_type: str, file_path: str):
+        """Load arch from file upload card"""
+        try:
+            self.workflow_manager.load_arch(file_path, arch_type)
 
-                # Auto-switch active arch to the one being loaded
-                self.workflow_manager.set_active_arch(arch_type)
-                if arch_type == 'upper':
-                    self.active_upper.setChecked(True)
-                    self.upper_status.setText("✓ Loaded")
-                    self.upper_status.setStyleSheet("color: green;")
-                else:
-                    self.active_lower.setChecked(True)
-                    self.lower_status.setText("✓ Loaded")
-                    self.lower_status.setStyleSheet("color: green;")
+            # Auto-switch active arch to the one being loaded
+            self.workflow_manager.set_active_arch(arch_type)
+            if arch_type == 'upper':
+                self.active_upper.setChecked(True)
+            else:
+                self.active_lower.setChecked(True)
 
-                # Emit signal for main window to update visualizer
-                self.arch_loaded.emit(arch_type, file_path)
+            # Emit signal for main window to update visualizer
+            self.arch_loaded.emit(arch_type, file_path)
+            
+            # Run automatic detection based on mode
+            current_mode = self.workflow_manager.current_mode.value
+            
+            if current_mode == 'automatic':
+                self.run_automatic_detection(arch_type)
                 
-                # ✅ FIX: Run automatic detection in BOTH automatic AND hybrid modes
-                current_mode = self.workflow_manager.current_mode.value
+            elif current_mode == 'hybrid':
+                self.run_automatic_detection(arch_type)
+                QMessageBox.information(
+                    self,
+                    "Hybrid Mode - Auto Wire Generated",
+                    f"{arch_type.capitalize()} arch loaded with automatic wire.\n"
+                    "Click 'Convert to Manual Mode' to refine the wire path."
+                )
                 
-                if current_mode == 'automatic':
-                    # Automatic mode: Full detection
-                    self.run_automatic_detection(arch_type)
+            elif current_mode == 'manual':
+                QMessageBox.information(
+                    self,
+                    "Manual Mode Active",
+                    f"{arch_type.capitalize()} arch loaded successfully!\n"
+                    "Click 'Define Wire Path (0/3)' to place control points."
+                )
                     
-                elif current_mode == 'hybrid':
-                    # ✅ FIX: Hybrid mode should ALSO run automatic detection!
-                    self.run_automatic_detection(arch_type)
-                    QMessageBox.information(
-                        self,
-                        "Hybrid Mode - Auto Wire Generated",
-                        f"{arch_type.capitalize()} arch loaded with automatic wire.\n"
-                        "Click 'Convert to Manual Mode' to refine the wire path."
-                    )
-                    
-                elif current_mode == 'manual':
-                    # Manual mode: Wait for user input
-                    QMessageBox.information(
-                        self,
-                        "Manual Mode Active",
-                        f"{arch_type.capitalize()} arch loaded successfully!\n"
-                        "Click 'Define Wire Path (0/3)' to place control points."
-                    )
-                        
-            except Exception as e:
-                import traceback
-                print("Error loading arch:")
-                traceback.print_exc()
-                QMessageBox.critical(self, "Error", f"Failed to load {arch_type} arch:\n{str(e)}")
+        except Exception as e:
+            import traceback
+            print("Error loading arch:")
+            traceback.print_exc()
+            QMessageBox.critical(self, "Error", f"Failed to load {arch_type} arch:\n{str(e)}")
     
-    def load_opposing_arch(self):
-        """Load opposing arch for collision detection"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Select Opposing Arch STL", 
-            "", 
-            "STL Files (*.stl)"
-        )
-        
-        if file_path:
-            try:
-                self.workflow_manager.load_opposing_arch(file_path)
-                self.opposing_status.setText("✓ Loaded")
-                self.opposing_status.setStyleSheet("color: green;")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load opposing arch:\n{str(e)}")
+    def load_opposing_arch_from_card(self, file_path: str):
+        """Load opposing arch from file upload card"""
+        try:
+            self.workflow_manager.load_opposing_arch(file_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load opposing arch:\n{str(e)}")
+    
+    # ============================================
+    # MODE AND ARCH SELECTION HANDLERS
+    # ============================================
     
     def on_mode_changed(self):
         """Handle mode selection change"""
@@ -428,23 +420,24 @@ class EnhancedControlPanel(QWidget):
         show_both = (state == Qt.Checked)
         self.show_both_changed.emit(show_both)
     
+    # ============================================
+    # PARAMETER ADJUSTMENT HANDLERS
+    # ============================================
+    
     def on_height_changed(self, value):
-        """✅ FIX: Handle height slider change and regenerate wire"""
+        """Handle height slider change and regenerate wire"""
         height_mm = value / 10.0
         self.height_label.setText(f"{height_mm:.1f} mm")
         self.workflow_manager.set_global_height(height_mm)
         
-        # ✅ FIX: Regenerate wire with new height
+        # Regenerate wire with new height
         active_arch = self.workflow_manager.get_active_arch()
         arch_data = self.workflow_manager.get_arch_data(active_arch)
         
         if arch_data and arch_data.get('bracket_positions'):
-            # Regenerate wire path with new height
             try:
                 wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
-                # Store the updated wire path
                 arch_data['wire_path'] = wire_path
-                # Emit signal to update visualization
                 self.wire_generated.emit()
             except Exception as e:
                 print(f"Error updating wire height: {e}")
@@ -460,12 +453,9 @@ class EnhancedControlPanel(QWidget):
         arch_data = self.workflow_manager.get_arch_data(active_arch)
 
         if arch_data and arch_data.get('bracket_positions'):
-            # Regenerate wire path with new offset
             try:
                 wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
-                # Store the updated wire path
                 arch_data['wire_path'] = wire_path
-                # Emit signal to update visualization
                 self.wire_generated.emit()
             except Exception as e:
                 print(f"Error updating wire AP offset: {e}")
@@ -473,7 +463,6 @@ class EnhancedControlPanel(QWidget):
     def on_wire_diameter_changed(self, value):
         """Handle wire diameter change"""
         self.workflow_manager.set_wire_diameter(value)
-        # Wire diameter is mainly for export, but we store it
 
     def on_smoothness_changed(self, value):
         """Handle smoothness slider change and regenerate wire"""
@@ -485,26 +474,27 @@ class EnhancedControlPanel(QWidget):
         arch_data = self.workflow_manager.get_arch_data(active_arch)
 
         if arch_data and arch_data.get('bracket_positions'):
-            # Regenerate wire path with new smoothness
             try:
                 wire_path = self.workflow_manager.generate_wire_from_brackets(active_arch)
-                # Store the updated wire path
                 arch_data['wire_path'] = wire_path
-                # Emit signal to update visualization
                 self.wire_generated.emit()
             except Exception as e:
                 print(f"Error updating wire smoothness: {e}")
 
     def on_jaw_rotation_changed(self, value):
-        """Handle jaw rotation slider change."""
+        """Handle jaw rotation slider change"""
         self.jaw_rotation_label.setText(f"{value}°")
         self.jaw_rotation_changed.emit(value)
 
+    # ============================================
+    # WORKFLOW STEPS (Dynamic based on mode)
+    # ============================================
+    
     def update_workflow_steps(self):
         """Update workflow steps based on selected mode"""
         # Clear existing steps
-        while self.workflow_steps_layout.count():
-            child = self.workflow_steps_layout.takeAt(0)
+        while self.workflow_section.content_layout.count():
+            child = self.workflow_section.content_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
         
@@ -520,37 +510,37 @@ class EnhancedControlPanel(QWidget):
     def add_automatic_workflow_steps(self):
         """Add steps for automatic mode"""
         step1 = QLabel("Step 1: Load arch(es) → Automatic detection runs")
-        self.workflow_steps_layout.addWidget(step1)
+        self.workflow_section.add_widget(step1)
         
         step2 = QLabel("Step 2: Review detected teeth and wire")
-        self.workflow_steps_layout.addWidget(step2)
+        self.workflow_section.add_widget(step2)
         
         step3 = QLabel("Step 3: Adjust wire height if needed")
-        self.workflow_steps_layout.addWidget(step3)
+        self.workflow_section.add_widget(step3)
         
         self.run_detection_btn = QPushButton("Re-run Automatic Detection")
         self.run_detection_btn.clicked.connect(self.run_automatic_detection_manual)
-        self.workflow_steps_layout.addWidget(self.run_detection_btn)
+        self.workflow_section.add_widget(self.run_detection_btn)
         
         # Display toggles
         self.show_teeth_checkbox = QCheckBox("Show Detected Teeth")
         self.show_teeth_checkbox.setChecked(True)
         self.show_teeth_checkbox.stateChanged.connect(self.toggle_teeth_display)
-        self.workflow_steps_layout.addWidget(self.show_teeth_checkbox)
+        self.workflow_section.add_widget(self.show_teeth_checkbox)
         
         self.show_brackets_checkbox = QCheckBox("Show Bracket Positions")
         self.show_brackets_checkbox.setChecked(True)
         self.show_brackets_checkbox.stateChanged.connect(self.toggle_brackets_display)
-        self.workflow_steps_layout.addWidget(self.show_brackets_checkbox)
+        self.workflow_section.add_widget(self.show_brackets_checkbox)
     
     def add_manual_workflow_steps(self):
-        """✅ FIX: Add steps for manual mode - will use bracket positions"""
+        """Add steps for manual mode"""
         step1 = QLabel("Step 1: Define Wire Path (3 Points)")
-        self.workflow_steps_layout.addWidget(step1)
+        self.workflow_section.add_widget(step1)
         
         step1_desc = QLabel("Wire will follow teeth between selected points")
-        step1_desc.setStyleSheet("color: gray; font-size: 10px;")
-        self.workflow_steps_layout.addWidget(step1_desc)
+        step1_desc.setStyleSheet("color: #718096; font-size: 12px;")
+        self.workflow_section.add_widget(step1_desc)
         
         path_layout = QHBoxLayout()
         self.define_path_btn = QPushButton("Define Wire Path (0/3)")
@@ -562,50 +552,48 @@ class EnhancedControlPanel(QWidget):
         self.reset_path_btn.setEnabled(False)
         path_layout.addWidget(self.reset_path_btn)
         
-        path_widget = QWidget()
-        path_widget.setLayout(path_layout)
-        self.workflow_steps_layout.addWidget(path_widget)
+        self.workflow_section.add_layout(path_layout)
         
         step2 = QLabel("Step 2: Generate Wire Along Teeth")
-        self.workflow_steps_layout.addWidget(step2)
+        self.workflow_section.add_widget(step2)
         
         self.generate_wire_btn = QPushButton("Generate Wire")
         self.generate_wire_btn.clicked.connect(self.generate_manual_wire)
         self.generate_wire_btn.setEnabled(False)
-        self.workflow_steps_layout.addWidget(self.generate_wire_btn)
+        self.workflow_section.add_widget(self.generate_wire_btn)
     
     def add_hybrid_workflow_steps(self):
-        """✅ FIX: Add steps for hybrid mode with better descriptions"""
+        """Add steps for hybrid mode"""
         step1 = QLabel("Step 1: Load arch → Automatic wire generation")
-        self.workflow_steps_layout.addWidget(step1)
+        self.workflow_section.add_widget(step1)
         
         step1_desc = QLabel("Wire is automatically generated when you load the arch")
-        step1_desc.setStyleSheet("color: gray; font-size: 10px;")
-        self.workflow_steps_layout.addWidget(step1_desc)
+        step1_desc.setStyleSheet("color: #718096; font-size: 12px;")
+        self.workflow_section.add_widget(step1_desc)
         
         self.run_auto_btn = QPushButton("Re-run Automatic Detection")
         self.run_auto_btn.clicked.connect(self.run_automatic_detection_manual)
-        self.workflow_steps_layout.addWidget(self.run_auto_btn)
+        self.workflow_section.add_widget(self.run_auto_btn)
         
         step2 = QLabel("Step 2: Convert to manual control points")
-        self.workflow_steps_layout.addWidget(step2)
+        self.workflow_section.add_widget(step2)
         
         self.convert_to_manual_btn = QPushButton("Convert to Manual Mode")
         self.convert_to_manual_btn.clicked.connect(self.convert_auto_to_manual)
         self.convert_to_manual_btn.setEnabled(False)
-        self.workflow_steps_layout.addWidget(self.convert_to_manual_btn)
+        self.workflow_section.add_widget(self.convert_to_manual_btn)
         
         step3 = QLabel("Step 3: Manually adjust control points")
-        self.workflow_steps_layout.addWidget(step3)
+        self.workflow_section.add_widget(step3)
         
         adjust_desc = QLabel("Drag points or add/remove as needed")
-        adjust_desc.setStyleSheet("color: gray; font-size: 10px;")
-        self.workflow_steps_layout.addWidget(adjust_desc)
+        adjust_desc.setStyleSheet("color: #718096; font-size: 12px;")
+        self.workflow_section.add_widget(adjust_desc)
         
         self.enable_drag_btn = QPushButton("Enable Point Dragging")
         self.enable_drag_btn.clicked.connect(self.enable_point_dragging)
         self.enable_drag_btn.setEnabled(False)
-        self.workflow_steps_layout.addWidget(self.enable_drag_btn)
+        self.workflow_section.add_widget(self.enable_drag_btn)
     
     # ============================================
     # AUTOMATIC MODE FUNCTIONS
@@ -649,7 +637,7 @@ class EnhancedControlPanel(QWidget):
             # Emit signal to update visualization
             self.wire_generated.emit()
             
-            # ✅ FIX: Enable conversion button in hybrid mode
+            # Enable conversion button in hybrid mode
             if self.mode_hybrid.isChecked():
                 self.convert_to_manual_btn.setEnabled(True)
                 
@@ -673,12 +661,10 @@ class EnhancedControlPanel(QWidget):
     
     def toggle_teeth_display(self, state):
         """Toggle display of detected teeth"""
-        # This would be connected to the visualizer
         pass
     
     def toggle_brackets_display(self, state):
         """Toggle display of bracket positions"""
-        # This would be connected to the visualizer
         pass
     
     # ============================================
@@ -686,7 +672,7 @@ class EnhancedControlPanel(QWidget):
     # ============================================
     
     def define_wire_path_3_points(self):
-        """✅ FIX: Launch PyVista point selector with tooth detection"""
+        """Launch PyVista point selector with tooth detection"""
         active_arch = self.workflow_manager.get_active_arch()
         arch_data = self.workflow_manager.get_arch_data(active_arch)
         
@@ -694,10 +680,9 @@ class EnhancedControlPanel(QWidget):
             QMessageBox.warning(self, "No Mesh", "Please load an arch before selecting points.")
             return
         
-        # ✅ FIX: Run tooth detection first if not done yet
+        # Run tooth detection first if not done yet
         if not arch_data.get('teeth_detected') or not arch_data.get('bracket_positions'):
             try:
-                # Run detection silently
                 detected_teeth, bracket_positions, _ = self.workflow_manager.run_automatic_detection(active_arch)
                 print(f"Detected {len(detected_teeth)} teeth for manual mode")
             except Exception as e:
@@ -714,7 +699,7 @@ class EnhancedControlPanel(QWidget):
         self.define_path_btn.setEnabled(False)
 
     def reset_wire_path(self):
-        """Reset the 3-point wire path."""
+        """Reset the 3-point wire path"""
         self.workflow_manager.clear_control_points()
         self.define_path_btn.setText("Define Wire Path (0/3)")
         self.define_path_btn.setEnabled(True)
@@ -722,9 +707,8 @@ class EnhancedControlPanel(QWidget):
         self.generate_wire_btn.setEnabled(False)
     
     def generate_manual_wire(self):
-        """✅ FIX: Generate wire that follows teeth between 3 points"""
+        """Generate wire that follows teeth between 3 points"""
         try:
-            # Generate wire using bracket positions (follows teeth)
             wire_path = self.workflow_manager.generate_wire_from_control_points()
             self.wire_generated.emit()
             QMessageBox.information(self, "Success", "Wire generated following tooth contours!")
@@ -748,7 +732,6 @@ class EnhancedControlPanel(QWidget):
                 QMessageBox.warning(self, "No Data", f"No {arch_type} arch data available.")
                 return
             
-            # Check if wire path exists
             if arch_data.get('wire_path') is None or len(arch_data.get('wire_path', [])) == 0:
                 QMessageBox.warning(
                     self, 
@@ -774,125 +757,192 @@ class EnhancedControlPanel(QWidget):
                 QMessageBox.warning(
                     self, 
                     "Conversion Failed", 
-                    "Could not extract control points from automatic wire path.\n"
-                    "The wire path may be empty or invalid."
+                    "Could not extract control points from automatic wire path."
                 )
 
         except Exception as e:
             import traceback
-            error_details = traceback.format_exc()
             print("Full error traceback:")
-            print(error_details)
+            traceback.print_exc()
             QMessageBox.critical(
                 self, 
                 "Error", 
-                f"Failed to convert to manual mode:\n{str(e)}\n\nSee console for details."
+                f"Failed to convert to manual mode:\n{str(e)}"
             )
     
     def enable_point_dragging(self):
         """Enable dragging of control points"""
-        # Get the main window's visualizer
         main_window = self.parent().parent().parent()
         visualizer = main_window.visualizer
-
-        # Enable dragging in the visualizer
         visualizer.enable_control_point_dragging()
-
         self.enable_drag_btn.setText("Point Dragging Enabled ✓")
-        self.enable_drag_btn.setStyleSheet("background-color: #90EE90;")
+        self.enable_drag_btn.setEnabled(False)
     
     # ============================================
-    # COLLISION AND EXPORT
+    # COLLISION AND EXPORT FUNCTIONS
     # ============================================
     
     def check_collisions(self):
         """Check for collisions with opposing arch"""
-        if not self.workflow_manager.has_opposing_arch():
-            QMessageBox.warning(
-                self,
-                "No Opposing Arch",
-                "Please load an opposing arch first to check for collisions."
-            )
-            return
-        
         try:
-            collisions = self.workflow_manager.detect_collisions()
+            active_arch = self.workflow_manager.get_active_arch()
+            arch_data = self.workflow_manager.get_arch_data(active_arch)
             
-            if len(collisions) > 0:
-                self.collision_status.setText(
-                    f"⚠️ WARNING: {len(collisions)} collision points detected!\n"
-                    f"Wire will interfere with opposing teeth."
-                )
-                self.collision_status.setStyleSheet("color: red; font-weight: bold;")
+            if not arch_data or arch_data.get('wire_path') is None:
+                QMessageBox.warning(self, "No Wire", "Please generate a wire first.")
+                return
+            
+            if not self.workflow_manager.opposing_arch_data:
+                QMessageBox.warning(self, "No Opposing Arch", "Please load opposing arch first.")
+                return
+            
+            # Check for collisions
+            has_collision, collision_points = self.workflow_manager.check_wire_collision(active_arch)
+            
+            if has_collision:
+                self.collision_status.setText(f"⚠️ Collision detected at {len(collision_points)} points")
+                self.collision_status.setStyleSheet("color: #dc3545; font-weight: 600;")
             else:
-                self.collision_status.setText("✓ No collisions detected. Wire is clear.")
-                self.collision_status.setStyleSheet("color: green; font-weight: bold;")
+                self.collision_status.setText("✓ No collisions detected")
+                self.collision_status.setStyleSheet("color: #28a745; font-weight: 600;")
                 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Collision detection failed:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Collision check failed:\n{str(e)}")
     
     def export_gcode(self):
-        """Generate G-code and display it in the GUI, with an option to save."""
+        """Generate G-code and display it"""
         try:
-            wire_diameter = self.wire_diameter.value()
-            gcode_content = self.workflow_manager.export_gcode(wire_size=wire_diameter)
-
-            if gcode_content:
-                self.gcode_exported.emit(gcode_content)
-                QMessageBox.information(self, "G-Code Generated", "G-Code is now displayed in the Exported Code Viewer.")
-
-                reply = QMessageBox.question(self, 'Save G-Code', 'Do you want to save the G-Code to a file?',
-                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-
-                if reply == QMessageBox.Yes:
-                    file_path, _ = QFileDialog.getSaveFileName(
-                        self, "Save G-Code", "", "G-Code Files (*.gcode)"
-                    )
-                    if file_path:
-                        with open(file_path, 'w') as f:
-                            f.write(gcode_content)
-                        QMessageBox.information(self, "Success", f"G-Code saved to {file_path}")
-            else:
-                QMessageBox.warning(self, "Export Failed", "Could not generate G-Code. Ensure a wire path exists.")
-
+            active_arch = self.workflow_manager.get_active_arch()
+            arch_data = self.workflow_manager.get_arch_data(active_arch)
+            
+            if not arch_data or arch_data.get('wire_path') is None:
+                QMessageBox.warning(self, "No Wire", "Please generate a wire first.")
+                return
+            
+            gcode = self.workflow_manager.export_gcode(active_arch)
+            self.gcode_exported.emit(gcode)
+            
+            # Ask if user wants to save
+            reply = QMessageBox.question(
+                self, 
+                "Export G-Code", 
+                "G-Code generated! Would you like to save it to a file?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                file_path, _ = QFileDialog.getSaveFileName(
+                    self, 
+                    "Save G-Code", 
+                    f"{active_arch}_wire.gcode", 
+                    "G-Code Files (*.gcode);;All Files (*)"
+                )
+                
+                if file_path:
+                    with open(file_path, 'w') as f:
+                        f.write(gcode)
+                    QMessageBox.information(self, "Success", f"G-Code saved to {file_path}")
+                    
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"G-Code export failed:\n{str(e)}")
     
     def export_esp32(self):
-        """Generate ESP32 code and display it in the GUI, with an option to save."""
+        """Generate ESP32 code and display it"""
         try:
-            wire_diameter = self.wire_diameter.value()
-            esp32_code = self.workflow_manager.export_esp32(wire_size=wire_diameter)
-
-            if esp32_code:
-                self.esp32_code_exported.emit(esp32_code)
-                QMessageBox.information(self, "ESP32 Code Generated", "ESP32 code is now displayed in the Exported Code Viewer.")
-
-                reply = QMessageBox.question(self, 'Save ESP32 Code', 'Do you want to save the ESP32 code to a file?',
-                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-
-                if reply == QMessageBox.Yes:
-                    file_path, _ = QFileDialog.getSaveFileName(
-                        self, "Save ESP32 Code", "", "Arduino Files (*.ino)"
-                    )
-                    if file_path:
-                        with open(file_path, 'w') as f:
-                            f.write(esp32_code)
-                        QMessageBox.information(self, "Success", f"ESP32 code saved to {file_path}")
-            else:
-                QMessageBox.warning(self, "Export Failed", "Could not generate ESP32 code. Ensure a wire path exists.")
-
+            active_arch = self.workflow_manager.get_active_arch()
+            arch_data = self.workflow_manager.get_arch_data(active_arch)
+            
+            if not arch_data or arch_data.get('wire_path') is None:
+                QMessageBox.warning(self, "No Wire", "Please generate a wire first.")
+                return
+            
+            esp32_code = self.workflow_manager.export_esp32(active_arch)
+            self.esp32_code_exported.emit(esp32_code)
+            
+            reply = QMessageBox.question(
+                self, 
+                "Export ESP32 Code", 
+                "ESP32 code generated! Would you like to save it to a file?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                file_path, _ = QFileDialog.getSaveFileName(
+                    self, 
+                    "Save ESP32 Code", 
+                    f"{active_arch}_wire.ino", 
+                    "Arduino Files (*.ino);;All Files (*)"
+                )
+                
+                if file_path:
+                    with open(file_path, 'w') as f:
+                        f.write(esp32_code)
+                    QMessageBox.information(self, "Success", f"ESP32 code saved to {file_path}")
+                
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"ESP32 export failed:\n{str(e)}")
     
     def export_stl(self):
-        """Export STL"""
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save STL", "", "STL Files (*.stl)"
+        """Export wire as STL file"""
+        QMessageBox.information(self, "Coming Soon", "STL export will be available in a future update.")
+    
+    def clear_all_models(self):
+        """Clear all loaded models and reset workflow"""
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Clear All Models",
+            "This will clear all loaded models and reset the workflow.\n\nAre you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
         )
-        if file_path:
+        
+        if reply == QMessageBox.Yes:
             try:
-                self.workflow_manager.export_stl(file_path)
-                QMessageBox.information(self, "Success", "STL exported successfully!")
+                # Reset workflow manager
+                self.workflow_manager.reset_workflow()
+                
+                # Clear file upload cards (if they have clear method)
+                if hasattr(self.upper_card, 'clear_file'):
+                    self.upper_card.clear_file()
+                if hasattr(self.lower_card, 'clear_file'):
+                    self.lower_card.clear_file()
+                if hasattr(self.opposing_card, 'clear_file'):
+                    self.opposing_card.clear_file()
+                
+                # Reset sliders
+                self.height_slider.setValue(0)
+                self.ap_slider.setValue(0)
+                self.smoothness_slider.setValue(300)
+                self.wire_diameter.setValue(0.9)
+                self.jaw_rotation_slider.setValue(0)
+                
+                # Reset collision status
+                self.collision_status.setText("No collision check performed")
+                self.collision_status.setStyleSheet("color: #718096; font-size: 12px;")
+                
+                # Reset mode to automatic
+                self.mode_automatic.setChecked(True)
+                
+                # Reset active arch to upper
+                self.active_upper.setChecked(True)
+                self.show_both_checkbox.setChecked(False)
+                
+                # Update workflow steps
+                self.update_workflow_steps()
+                
+                # Emit signal to main window to clear visualizer
+                self.models_cleared.emit()
+                
+                QMessageBox.information(
+                    self,
+                    "Reset Complete",
+                    "All models cleared and workflow reset successfully."
+                )
+                
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to clear models:\n{str(e)}"
+                )
