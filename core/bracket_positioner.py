@@ -1,31 +1,51 @@
 
 # ================================================================
 # core/bracket_positioner.py
-"""Bracket positioning algorithms for lingual orthodontics."""
+"""Bracket positioning using polynomial arch form (research-based approach)."""
 
 import numpy as np
 from typing import List, Dict
 from .constants import BRACKET_HEIGHTS, CLINICAL_OFFSETS
+from .arch_modeling import fit_arch_polynomial, evaluate_polynomial, create_arch_form
 
 class BracketPositioner:
-    """Calculates optimal bracket positions on teeth."""
+    """Calculates optimal bracket positions using polynomial arch form."""
     
     def __init__(self, surface_type: str = 'lingual'):
         """Initialize bracket positioner."""
         self.surface_type = surface_type
-        self.clinical_offset = CLINICAL_OFFSETS.get(surface_type, 2.0)
-        self.positioning_parameters = {
-            'height_tolerance': 1.5,  # Reduced for more precise positioning
-            'percentile_threshold': 10,  # Use 10th percentile for true lingual surface
-            'min_vertices_for_positioning': 10,
-            'surface_offset': 0.5  # mm - minimal offset to prevent penetration
-        }
+        self.clinical_offset = CLINICAL_OFFSETS.get(surface_type, 1.5)
+        self.arch_form = None  # Will store fitted polynomial
         
     def calculate_positions(self, teeth: List[Dict], mesh, arch_center: np.ndarray, 
                           arch_type: str) -> List[Dict]:
-        """Calculate bracket positions for all teeth."""
-        bracket_positions = []
+        """
+        Calculate bracket positions using polynomial arch form.
         
+        NEW APPROACH:
+        1. Fit 6th order polynomial to tooth centers
+        2. Position brackets ON polynomial arch (not on tooth surfaces)
+        3. Wire follows arch = automatic clearance
+        """
+        if not teeth:
+            return []
+        
+        # Extract 2D tooth positions (X-Y plane)
+        tooth_centers_2d = np.array([[t['center'][0], t['center'][1]] for t in teeth])
+        
+        # Fit polynomial arch form
+        try:
+            self.arch_form = create_arch_form(tooth_centers_2d)
+            print(f"Arch form: {self.arch_form.classification}")
+            print(f"  Polynomial: Y = {self.arch_form.A:.3e}·x^6 + {self.arch_form.B:.4f}·x^2")
+            print(f"  Fit quality: R² = {self.arch_form.r_squared:.4f}")
+        except Exception as e:
+            print(f"Warning: Polynomial fit failed: {e}")
+            print("Falling back to direct tooth positions")
+            self.arch_form = None
+        
+        # Calculate bracket positions
+        bracket_positions = []
         for i, tooth in enumerate(teeth):
             bracket_pos = self._calculate_single_bracket(
                 tooth, mesh, arch_center, arch_type, i
@@ -39,40 +59,43 @@ class BracketPositioner:
     
     def _calculate_single_bracket(self, tooth: Dict, mesh, arch_center: np.ndarray,
                                 arch_type: str, tooth_index: int) -> Dict:
-        """Calculate bracket position for a single tooth using ACTUAL tooth surface."""
+        """
+        Calculate bracket position ON polynomial arch (not on tooth surface).
+        
+        KEY DIFFERENCE: Position is calculated from arch form, not tooth surface.
+        """
         tooth_type = tooth.get('type', 'posterior')
         tooth_center = tooth['center']
-        tooth_vertices = tooth['vertices']
         
-        # Get bracket height based on tooth type
-        bracket_height = BRACKET_HEIGHTS.get(tooth_type, 3.5)
+        # Get X position from tooth
+        x_pos = tooth_center[0]
         
-        # Calculate target height on tooth - USE TOOTH CENTER HEIGHT
-        height_axis = 2  # Z-axis
+        # Calculate Y position from polynomial arch (if available)
+        if self.arch_form is not None:
+            y_pos = evaluate_polynomial(
+                self.arch_form.A, 
+                self.arch_form.B, 
+                np.array([x_pos])
+            )[0]
+        else:
+            # Fallback: use tooth center Y
+            y_pos = tooth_center[1]
         
-        # Use tooth center height as reference (more stable)
-        center_height = tooth_center[height_axis]
+        # Z position: use tooth center height (mid-tooth level)
+        z_pos = tooth_center[2]
         
-        # Position bracket at center height (not min/max)
-        # This keeps wire at mid-tooth level, preventing collision
-        target_height = center_height
+        # Bracket position ON polynomial arch
+        bracket_pos = np.array([x_pos, y_pos, z_pos])
         
-        # Find TRUE lingual surface position
-        bracket_pos = self._find_true_lingual_surface(
-            tooth_vertices, tooth_center, arch_center, target_height, height_axis
-        )
+        # Calculate normal vector (points away from arch center)
+        normal = self._calculate_arch_normal(bracket_pos, arch_center)
         
-        # Calculate surface normal pointing OUTWARD from tooth
-        normal = self._calculate_tooth_surface_normal(
-            bracket_pos, tooth_vertices, arch_center
-        )
+        # Add small outward offset for clearance (1-2mm)
+        # This ensures wire sits OUTSIDE teeth
+        clearance_offset = 1.5  # mm
+        bracket_pos = bracket_pos + normal * clearance_offset
         
-        # Apply MINIMAL offset to prevent penetration (0.5mm)
-        # This keeps wire very close to tooth surface
-        surface_offset = self.positioning_parameters['surface_offset']
-        bracket_pos = bracket_pos + normal * surface_offset
-        
-        # Determine visibility (only frontal teeth get brackets: incisors and canines)
+        # Determine visibility (only frontal teeth: incisors and canines)
         visible = tooth_type in ['incisor', 'canine']
         
         return {
@@ -81,105 +104,29 @@ class BracketPositioner:
             'tooth_index': tooth_index,
             'tooth_center': tooth_center,
             'normal': normal,
-            'height': bracket_height,
+            'height': BRACKET_HEIGHTS.get(tooth_type, 3.5),
             'surface': self.surface_type,
             'visible': visible,
-            'original_position': bracket_pos.copy()
+            'original_position': bracket_pos.copy(),
+            'on_arch': True  # Key flag: positioned on arch, not surface
         }
     
-    def _find_true_lingual_surface(self, tooth_vertices: np.ndarray, tooth_center: np.ndarray,
-                             arch_center: np.ndarray, target_height: float, 
-                             height_axis: int) -> np.ndarray:
+    def _calculate_arch_normal(self, bracket_pos: np.ndarray, 
+                              arch_center: np.ndarray) -> np.ndarray:
         """
-        Find TRUE lingual (inner) surface position using proper surface detection.
+        Calculate normal vector pointing AWAY from arch center.
         
-        This method finds the actual innermost surface of the tooth at the target height.
+        This ensures wire sits OUTSIDE the arch (and teeth).
         """
-        # Get vertices at bracket level (tight tolerance for precision)
-        height_tolerance = self.positioning_parameters['height_tolerance']
-        bracket_level_mask = np.abs(tooth_vertices[:, height_axis] - target_height) < height_tolerance
-        bracket_level_vertices = tooth_vertices[bracket_level_mask]
-        
-        min_vertices = self.positioning_parameters['min_vertices_for_positioning']
-        if len(bracket_level_vertices) < min_vertices:
-            # Fallback to tooth center at target height
-            bracket_pos = tooth_center.copy()
-            bracket_pos[height_axis] = target_height
-            return bracket_pos
-        
-        # Calculate radial direction (outward from arch center)
-        tooth_horizontal = tooth_center.copy()
-        tooth_horizontal[height_axis] = 0
-        center_horizontal = arch_center.copy()
-        center_horizontal[height_axis] = 0
-        
-        radial_vector = tooth_horizontal - center_horizontal
-        if np.linalg.norm(radial_vector) > 0:
-            radial_direction = radial_vector / np.linalg.norm(radial_vector)
-        else:
-            radial_direction = np.array([1, 0, 0])
-        
-        # Calculate radial distances for all vertices at this height
-        radial_distances = []
-        for vertex in bracket_level_vertices:
-            vertex_horizontal = vertex.copy()
-            vertex_horizontal[height_axis] = 0
-            vertex_radial = vertex_horizontal - center_horizontal
-            radial_dist = np.dot(vertex_radial, radial_direction)
-            radial_distances.append(radial_dist)
-        
-        radial_distances = np.array(radial_distances)
-        
-        # Use 10th percentile to find TRUE innermost surface (more aggressive)
-        percentile_threshold = self.positioning_parameters['percentile_threshold']
-        percentile_value = np.percentile(radial_distances, percentile_threshold)
-        lingual_mask = radial_distances <= percentile_value
-        lingual_vertices = bracket_level_vertices[lingual_mask]
-        
-        if len(lingual_vertices) > 3:
-            # Average of innermost vertices = true lingual surface
-            return np.mean(lingual_vertices, axis=0)
-        else:
-            # Use single innermost vertex
-            return bracket_level_vertices[np.argmin(radial_distances)]
-    
-    def _calculate_tooth_surface_normal(self, surface_point: np.ndarray,
-                                       tooth_vertices: np.ndarray,
-                                       arch_center: np.ndarray) -> np.ndarray:
-        """
-        Calculate surface normal at the bracket position pointing OUTWARD from tooth.
-        
-        This ensures the wire sits outside the tooth surface, preventing penetration.
-        """
-        # Find nearby vertices to estimate local surface normal
-        distances = np.linalg.norm(tooth_vertices - surface_point, axis=1)
-        nearby_indices = np.argsort(distances)[:10]  # 10 nearest vertices
-        nearby_vertices = tooth_vertices[nearby_indices]
-        
-        # Calculate normal using PCA of nearby vertices
-        centered = nearby_vertices - surface_point
-        cov_matrix = np.cov(centered.T)
-        eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
-        
-        # Normal is the eigenvector with smallest eigenvalue (perpendicular to surface)
-        normal_idx = np.argmin(eigenvalues)
-        normal = eigenvectors[:, normal_idx].real
-        
-        # Ensure normal points OUTWARD (away from arch center)
-        to_center = arch_center - surface_point
-        if np.dot(normal, to_center) > 0:
-            normal = -normal  # Flip if pointing inward
+        # Vector from arch center to bracket (in horizontal plane)
+        to_bracket = bracket_pos - arch_center
+        to_bracket[2] = 0  # Remove Z component (horizontal only)
         
         # Normalize
-        if np.linalg.norm(normal) > 0:
-            normal = normal / np.linalg.norm(normal)
+        if np.linalg.norm(to_bracket) > 0:
+            normal = to_bracket / np.linalg.norm(to_bracket)
         else:
-            # Fallback: radial direction
-            horizontal_vector = surface_point - arch_center
-            horizontal_vector[2] = 0
-            if np.linalg.norm(horizontal_vector) > 0:
-                normal = horizontal_vector / np.linalg.norm(horizontal_vector)
-            else:
-                normal = np.array([0, 1, 0])
+            # Fallback: point anteriorly
+            normal = np.array([0, 1, 0])
         
         return normal
