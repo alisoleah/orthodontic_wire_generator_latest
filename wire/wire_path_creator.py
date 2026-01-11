@@ -86,8 +86,9 @@ class WirePathCreator:
         if height_offset != 0.0:
             self.wire_path[:, 2] += height_offset
         
-        # Step 6: Apply moderate smoothing (reduced from previous aggressive smoothing)
-        self.wire_path = self._apply_gaussian_smoothing(self.wire_path, sigma=3.0)
+        # Step 6: Apply MINIMAL smoothing for professional appearance
+        # Reduced from 3.0 to 2.0 for sharper bends at each tooth
+        self.wire_path = self._apply_gaussian_smoothing(self.wire_path, sigma=2.0)
         
         # Step 7: Validate and clean the path
         self.wire_path = self._validate_and_clean_path()
@@ -100,11 +101,11 @@ class WirePathCreator:
         Generate professional wire path that follows teeth closely.
         
         Uses Catmull-Rom spline through bracket positions for smooth bends at each tooth,
-        not a pure polynomial which is too oval.
+        with parameters tuned for professional clinical appearance.
         """
         from scipy.interpolate import CubicSpline
         
-        # Extract bracket positions (these are already on polynomial arch + offset)
+        # Extract bracket positions (these are already on actual lingual surface)
         bracket_positions = np.array([b['position'] for b in sorted_brackets])
         
         if len(bracket_positions) < 4:
@@ -119,13 +120,14 @@ class WirePathCreator:
         arc_length = np.concatenate([[0], np.cumsum(distances)])
         
         # Create cubic splines for each dimension
-        # 'natural' boundary conditions give smooth endpoints
-        x_spline = CubicSpline(arc_length, bracket_positions[:, 0], bc_type='natural')
-        y_spline = CubicSpline(arc_length, bracket_positions[:, 1], bc_type='natural')
-        z_spline = CubicSpline(arc_length, bracket_positions[:, 2], bc_type='natural')
+        # Using 'clamped' boundary conditions for better endpoint control
+        x_spline = CubicSpline(arc_length, bracket_positions[:, 0], bc_type='clamped')
+        y_spline = CubicSpline(arc_length, bracket_positions[:, 1], bc_type='clamped')
+        z_spline = CubicSpline(arc_length, bracket_positions[:, 2], bc_type='clamped')
         
-        # Generate dense points along the spline (50 points per bracket interval)
-        num_points = len(bracket_positions) * 50
+        # Generate dense points along the spline (80 points per bracket interval)
+        # More points = smoother professional appearance
+        num_points = len(bracket_positions) * 80
         s_dense = np.linspace(0, arc_length[-1], num_points)
         
         # Evaluate splines
@@ -139,6 +141,7 @@ class WirePathCreator:
         print(f"Generated professional wire: {len(wire_path)} points through {len(bracket_positions)} brackets")
         print(f"  Arch form: {arch_form.classification}")
         print(f"  Using Catmull-Rom spline for natural tooth-following bends")
+        print(f"  Density: {num_points // len(bracket_positions)} points per bracket")
         
         return wire_path
     

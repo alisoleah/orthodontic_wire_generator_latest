@@ -46,6 +46,7 @@ class CollapsibleControlPanel(QWidget):
     gcode_exported = pyqtSignal(str)
     esp32_code_exported = pyqtSignal(str)
     jaw_rotation_changed = pyqtSignal(int)
+    models_cleared = pyqtSignal()  # NEW: Signal when clear all is clicked
     
     def __init__(self, workflow_manager: WorkflowManager, parent=None):
         super().__init__(parent)
@@ -929,6 +930,9 @@ class CollapsibleControlPanel(QWidget):
                 
                 # Update workflow steps
                 self.update_workflow_steps()
+                
+                # Emit signal to main window to clear visualizer
+                self.models_cleared.emit()
                 
                 QMessageBox.information(
                     self,

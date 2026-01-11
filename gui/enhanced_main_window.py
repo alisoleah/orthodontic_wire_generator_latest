@@ -249,6 +249,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         self.control_panel.gcode_exported.connect(self.on_gcode_exported)
         self.control_panel.esp32_code_exported.connect(self.on_esp32_code_exported)
         self.control_panel.jaw_rotation_changed.connect(self.on_jaw_rotation_changed)
+        self.control_panel.models_cleared.connect(self.on_models_cleared)  # NEW: Clear visualizer
         
         # Visualizer signals
         self.visualizer.point_added.connect(self.on_point_added)
@@ -490,6 +491,13 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
         """Handle the jaw rotation slider change and update the visualizer."""
         if self.visualizer:
             self.visualizer.set_jaw_rotation(angle)
+    
+    def on_models_cleared(self):
+        """Handle clear all models - reset visualizer"""
+        if self.visualizer:
+            self.visualizer.clear_all()
+        self.status_panel.clear_all_info()
+        self.update_status("All models cleared - ready for new project")
 
     # ============================================
     # MENU ACTIONS
