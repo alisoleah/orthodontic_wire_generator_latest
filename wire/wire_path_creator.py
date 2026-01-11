@@ -97,62 +97,48 @@ class WirePathCreator:
     def _generate_polynomial_wire_path(self, sorted_brackets: List[Dict],
                                       arch_form, arch_center: np.ndarray) -> np.ndarray:
         """
-        Generate smooth wire path using polynomial arch as foundation.
+        Generate professional wire path that follows teeth closely.
         
-        This creates a homogeneous curve that follows the arch form,
-        not sharp angles at each bracket.
+        Uses Catmull-Rom spline through bracket positions for smooth bends at each tooth,
+        not a pure polynomial which is too oval.
         """
-        from core.arch_modeling import evaluate_polynomial
         from scipy.interpolate import CubicSpline
         
-        # Extract bracket positions
+        # Extract bracket positions (these are already on polynomial arch + offset)
         bracket_positions = np.array([b['position'] for b in sorted_brackets])
         
-        # Get X range (lateral extent)
-        x_min = np.min(bracket_positions[:, 0])
-        x_max = np.max(bracket_positions[:, 0])
+        if len(bracket_positions) < 4:
+            print("Warning: Not enough brackets for smooth spline")
+            return bracket_positions
         
-        # Generate DENSE points along polynomial arch (500 points for smooth curve)
-        num_points = 500
-        x_dense = np.linspace(x_min, x_max, num_points)
+        # Use Catmull-Rom spline for natural-looking curves through brackets
+        # This creates gentle bends at each tooth while maintaining smoothness
         
-        # Calculate Y from polynomial arch
-        y_dense = evaluate_polynomial(arch_form.A, arch_form.B, x_dense)
+        # Calculate arc length parameterization
+        distances = np.sqrt(np.sum(np.diff(bracket_positions, axis=0)**2, axis=1))
+        arc_length = np.concatenate([[0], np.cumsum(distances)])
         
-        # CRITICAL: Add outward offset to prevent penetration
-        # Calculate normal vectors for each point
-        z_offset_array = np.zeros(num_points)
-        for i in range(num_points):
-            # Vector from arch center to point (in XY plane)
-            point_2d = np.array([x_dense[i], y_dense[i]])
-            center_2d = arch_center[:2]
-            to_point = point_2d - center_2d
-            
-            if np.linalg.norm(to_point) > 0:
-                # Normalize
-                normal_2d = to_point / np.linalg.norm(to_point)
-                # Add 3mm outward offset (INCREASED from 1.5mm)
-                y_dense[i] += normal_2d[1] * 3.0  # Apply to Y component
+        # Create cubic splines for each dimension
+        # 'natural' boundary conditions give smooth endpoints
+        x_spline = CubicSpline(arc_length, bracket_positions[:, 0], bc_type='natural')
+        y_spline = CubicSpline(arc_length, bracket_positions[:, 1], bc_type='natural')
+        z_spline = CubicSpline(arc_length, bracket_positions[:, 2], bc_type='natural')
         
-        # Interpolate Z using cubic spline through bracket heights
-        bracket_x = bracket_positions[:, 0]
-        bracket_z = bracket_positions[:, 2]
+        # Generate dense points along the spline (50 points per bracket interval)
+        num_points = len(bracket_positions) * 50
+        s_dense = np.linspace(0, arc_length[-1], num_points)
         
-        # Sort by X for spline
-        sort_idx = np.argsort(bracket_x)
-        bracket_x_sorted = bracket_x[sort_idx]
-        bracket_z_sorted = bracket_z[sort_idx]
-        
-        # Create cubic spline for Z
-        z_spline = CubicSpline(bracket_x_sorted, bracket_z_sorted, bc_type='natural')
-        z_dense = z_spline(x_dense)
+        # Evaluate splines
+        x_dense = x_spline(s_dense)
+        y_dense = y_spline(s_dense)
+        z_dense = z_spline(s_dense)
         
         # Combine into 3D path
         wire_path = np.column_stack([x_dense, y_dense, z_dense])
         
-        print(f"Generated polynomial wire: {len(wire_path)} points along smooth arch")
-        print(f"  X range: {x_min:.1f} to {x_max:.1f} mm")
-        print(f"  Polynomial: Y = {arch_form.A:.3e}·x^6 + {arch_form.B:.4f}·x^2")
+        print(f"Generated professional wire: {len(wire_path)} points through {len(bracket_positions)} brackets")
+        print(f"  Arch form: {arch_form.classification}")
+        print(f"  Using Catmull-Rom spline for natural tooth-following bends")
         
         return wire_path
     
