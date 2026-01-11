@@ -34,8 +34,8 @@ TOOTH_TYPES = {
 
 # Clinical parameters
 BRACKET_HEIGHTS = {
-    'incisor': 3.5,   # mm from gum line
-    'canine': 4.0,
+    'incisor': 7.0,   # mm from gum line (INCREASED from 3.5 to mid-crown)
+    'canine': 8.0,    # mm from gum line (INCREASED from 4.0 to mid-crown)
     'premolar': 4.5,
     'molar': 5.0
 }
