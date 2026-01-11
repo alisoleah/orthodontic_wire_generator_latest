@@ -214,7 +214,12 @@ class WorkflowManager:
         arch_data['bracket_positions'] = bracket_positions
         print(f"Positioned {len(bracket_positions)} brackets ({sum(1 for b in bracket_positions if b.get('visible', True))} visible)")
         
-        # Step 3: Generate wire path
+        # Step 3: Pass arch_form to wire path creator
+        if hasattr(self.bracket_positioner, 'arch_form') and self.bracket_positioner.arch_form is not None:
+            self.wire_path_creator.arch_form = self.bracket_positioner.arch_form
+            print(f"Passed arch form to wire creator: {self.bracket_positioner.arch_form.classification}")
+        
+        # Step 4: Generate wire path
         print(f"Generating wire path...")
         wire_path = self.generate_wire_from_brackets(arch_type)
         arch_data['wire_path'] = wire_path

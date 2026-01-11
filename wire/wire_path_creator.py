@@ -39,10 +39,12 @@ class WirePathCreator:
                           arch_center: np.ndarray,
                           height_offset: float = 0.0) -> Optional[np.ndarray]:
         """
-        Main wire path generation algorithm.
+        Main wire path generation algorithm using polynomial arch.
         
-        This is the core drawing algorithm that creates a smooth wire path
-        through the bracket positions using spline interpolation.
+        NEW APPROACH:
+        - Uses polynomial arch as foundation
+        - Generates dense points along curve (not just brackets)
+        - Creates homogeneous smooth wire
         
         Args:
             bracket_positions: List of bracket position dictionaries
@@ -63,22 +65,81 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: Generate control points for wire shaping
-        self.control_points = self._generate_control_points(sorted_brackets, arch_center)
+        # Step 3: Check if brackets have arch form data
+        arch_form = None
+        if sorted_brackets and 'on_arch' in sorted_brackets[0]:
+            # Brackets were positioned using polynomial arch
+            # Extract arch parameters from bracket positioner
+            arch_form = getattr(self, 'arch_form', None)
         
-        # Step 4: Apply height offset to all control points
-        self._apply_height_offset(height_offset)
+        # Step 4: Generate wire path
+        if arch_form is not None:
+            # NEW: Use polynomial arch for smooth homogeneous curve
+            self.wire_path = self._generate_polynomial_wire_path(
+                sorted_brackets, arch_form, arch_center
+            )
+        else:
+            # Fallback: Use traditional spline interpolation
+            self.control_points = self._generate_control_points(sorted_brackets, arch_center)
+            self._apply_height_offset(height_offset)
+            self.wire_path = self._interpolate_spline_path()
         
-        # Step 5: Generate smooth path using spline interpolation
-        self.wire_path = self._interpolate_spline_path()
+        # Step 5: Apply height offset
+        if height_offset != 0.0:
+            self.wire_path[:, 2] += height_offset
         
-        # Step 6: Apply wire tension and smoothing
-        self.wire_path = self._apply_wire_tension()
+        # Step 6: Apply moderate smoothing (reduced from previous aggressive smoothing)
+        self.wire_path = self._apply_gaussian_smoothing(self.wire_path, sigma=3.0)
         
         # Step 7: Validate and clean the path
         self.wire_path = self._validate_and_clean_path()
         
         return self.wire_path
+    
+    def _generate_polynomial_wire_path(self, sorted_brackets: List[Dict],
+                                      arch_form, arch_center: np.ndarray) -> np.ndarray:
+        """
+        Generate smooth wire path using polynomial arch as foundation.
+        
+        This creates a homogeneous curve that follows the arch form,
+        not sharp angles at each bracket.
+        """
+        from core.arch_modeling import evaluate_polynomial
+        from scipy.interpolate import CubicSpline
+        
+        # Extract bracket positions
+        bracket_positions = np.array([b['position'] for b in sorted_brackets])
+        
+        # Get X range (lateral extent)
+        x_min = np.min(bracket_positions[:, 0])
+        x_max = np.max(bracket_positions[:, 0])
+        
+        # Generate DENSE points along polynomial arch (500 points for smooth curve)
+        num_points = 500
+        x_dense = np.linspace(x_min, x_max, num_points)
+        
+        # Calculate Y from polynomial arch
+        y_dense = evaluate_polynomial(arch_form.A, arch_form.B, x_dense)
+        
+        # Interpolate Z using cubic spline through bracket heights
+        bracket_x = bracket_positions[:, 0]
+        bracket_z = bracket_positions[:, 2]
+        
+        # Sort by X for spline
+        sort_idx = np.argsort(bracket_x)
+        bracket_x_sorted = bracket_x[sort_idx]
+        bracket_z_sorted = bracket_z[sort_idx]
+        
+        # Create cubic spline for Z
+        z_spline = CubicSpline(bracket_x_sorted, bracket_z_sorted, bc_type='natural')
+        z_dense = z_spline(x_dense)
+        
+        # Combine into 3D path
+        wire_path = np.column_stack([x_dense, y_dense, z_dense])
+        
+        print(f"Generated polynomial wire: {len(wire_path)} points along smooth arch")
+        
+        return wire_path
     
     def _sort_brackets_by_angle(self, brackets: List[Dict], 
                                center: np.ndarray) -> List[Dict]:
