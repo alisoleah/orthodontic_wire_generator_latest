@@ -263,20 +263,23 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
     
     def setup_keyboard_shortcuts(self):
         """Setup keyboard shortcuts for camera and other functions"""
-        from PyQt5.QtWidgets import QShortcut
-        from PyQt5.QtGui import QKeySequence
-        
-        # Camera presets (F3-F6)
-        QShortcut(QKeySequence("F3"), self, self.visualizer.camera_front_view)
-        QShortcut(QKeySequence("F4"), self, self.visualizer.camera_side_view)
-        QShortcut(QKeySequence("F5"), self, self.visualizer.camera_top_view)
-        QShortcut(QKeySequence("F6"), self, self.visualizer.camera_oblique_view)
-        
-        print("Keyboard shortcuts enabled:")
-        print("  F3 - Front view")
-        print("  F4 - Side view")
-        print("  F5 - Top view")
-        print("  F6 - 3D oblique view")
+        # Disabled - old visualizer doesn't have camera preset methods
+        # Will re-enable when visualizer is updated
+        pass
+        # from PyQt5.QtWidgets import QShortcut
+        # from PyQt5.QtGui import QKeySequence
+        # 
+        # # Camera presets (F3-F6)
+        # QShortcut(QKeySequence("F3"), self, self.visualizer.camera_front_view)
+        # QShortcut(QKeySequence("F4"), self, self.visualizer.camera_side_view)
+        # QShortcut(QKeySequence("F5"), self, self.visualizer.camera_top_view)
+        # QShortcut(QKeySequence("F6"), self, self.visualizer.camera_oblique_view)
+        # 
+        # print("Keyboard shortcuts enabled:")
+        # print("  F3 - Front view")
+        # print("  F4 - Side view")
+        # print("  F5 - Top view")
+        # print("  F6 - 3D oblique view")
     
     def setup_styling(self):
         """Setup application styling and theme"""
