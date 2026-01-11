@@ -50,10 +50,10 @@ class BracketPositioner:
         
         # Calculate target height on tooth
         height_axis = 2  # Typically Z-axis
-        if arch_type == 'upper':
-            target_height = np.min(tooth_vertices[:, height_axis]) + bracket_height
-        else:
-            target_height = np.max(tooth_vertices[:, height_axis]) - bracket_height
+        
+        # CRITICAL FIX: Both upper and lower should ADD from minimum (gum level)
+        # Previous logic for lower was WRONG - it subtracted from top, putting brackets at gum
+        target_height = np.min(tooth_vertices[:, height_axis]) + bracket_height
         
         # Find bracket position on lingual surface
         bracket_pos = self._find_lingual_position(
