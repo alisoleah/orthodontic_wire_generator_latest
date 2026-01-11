@@ -63,15 +63,18 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: Extract bracket positions directly (no intermediate sampling)
+        # Step 3: Extract bracket positions
         positions = np.array([b['position'] for b in sorted_brackets])
         
-        # Step 4: Generate smooth path using Catmull-Rom spline through brackets
-        self.wire_path = self._catmull_rom_interpolation(positions)
+        # Step 4: Generate wire with VISIBLE BENDS at brackets (not smooth spline)
+        # Professional lingual wires have distinct bends at each bracket
+        self.wire_path = self._generate_angular_wire_path(positions)
         
-        # Step 5: Apply height offset
-        if height_offset != 0.0:
-            self.wire_path[:, 2] += height_offset
+        # Step 5: Apply height offset (move wire down by default)
+        default_height_offset = -1.5  # Move down 1.5mm for better position
+        total_offset = height_offset + default_height_offset
+        if total_offset != 0.0:
+            self.wire_path[:, 2] += total_offset
         
         # Step 6: COLLISION DETECTION - push penetrating points outward
         self.wire_path = self._apply_collision_detection(self.wire_path, arch_center)
@@ -80,6 +83,51 @@ class WirePathCreator:
         self.wire_path = self._validate_and_clean_path()
         
         return self.wire_path
+    
+    def _generate_angular_wire_path(self, positions: np.ndarray) -> np.ndarray:
+        """
+        Generate wire with visible bends at each bracket position.
+        
+        Unlike smooth spline, this creates:
+        - Short curved segments at each bracket (for the bend)
+        - Straight/slightly curved segments between brackets
+        
+        This matches professional lingual wire appearance.
+        """
+        if len(positions) < 2:
+            return positions
+        
+        wire_points = []
+        points_per_segment = 15  # Fewer points = more angular appearance
+        
+        for i in range(len(positions) - 1):
+            p0 = positions[max(0, i-1)]
+            p1 = positions[i]
+            p2 = positions[i+1]
+            p3 = positions[min(len(positions)-1, i+2)]
+            
+            # Generate segment with LESS smoothing (tension = 0.8 for sharper bends)
+            for j in range(points_per_segment):
+                t = j / points_per_segment
+                
+                # Catmull-Rom with high tension for sharper bends
+                tension = 0.8  # Higher = sharper bends at brackets
+                t2 = t * t
+                t3 = t2 * t
+                
+                # Modified Catmull-Rom for sharper bends
+                point = (
+                    ((-tension*t3 + 2*tension*t2 - tension*t) * p0 +
+                     ((2-tension)*t3 + (tension-3)*t2 + 1) * p1 +
+                     ((tension-2)*t3 + (3-2*tension)*t2 + tension*t) * p2 +
+                     (tension*t3 - tension*t2) * p3)
+                )
+                wire_points.append(point)
+        
+        # Add final point
+        wire_points.append(positions[-1])
+        
+        return np.array(wire_points)
     
     def _apply_collision_detection(self, wire_path: np.ndarray, 
                                    arch_center: np.ndarray) -> np.ndarray:
