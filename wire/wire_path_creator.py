@@ -63,25 +63,18 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: CRITICAL FIX - Sample tooth surface points between brackets
-        # This makes wire follow actual tooth geometry instead of smooth arc
-        all_control_points = self._generate_tooth_following_points(
-            sorted_brackets, arch_center
-        )
+        # Step 3: Extract bracket positions directly (no intermediate sampling)
+        # The surface sampling was causing gum-level paths by projecting to inter-dental valleys
+        positions = np.array([b['position'] for b in sorted_brackets])
         
-        # Step 4: Generate smooth path using spline interpolation through surface points
-        self.wire_path = self._catmull_rom_interpolation(
-            np.array([p['position'] for p in all_control_points])
-        )
+        # Step 4: Generate smooth path using Catmull-Rom spline through brackets
+        self.wire_path = self._catmull_rom_interpolation(positions)
         
         # Step 5: Apply height offset
         if height_offset != 0.0:
             self.wire_path[:, 2] += height_offset
         
-        # Step 6: Apply MINIMAL smoothing (sigma=0.5) to remove only sharp artifacts
-        self.wire_path = self._apply_gaussian_smoothing(self.wire_path, sigma=0.5)
-        
-        # Step 7: Validate and clean the path
+        # Step 6: Validate and clean the path (no smoothing - let spline define shape)
         self.wire_path = self._validate_and_clean_path()
         
         return self.wire_path

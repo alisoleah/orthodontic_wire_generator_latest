@@ -63,8 +63,11 @@ class BracketPositioner:
         # Calculate surface normal
         normal = self._calculate_surface_normal(tooth_center, arch_center)
         
-        # Apply clinical offset
-        bracket_pos = bracket_pos + normal * self.clinical_offset
+        # Apply NEGATIVE offset to push wire INTO lingual surface
+        # This ensures wire sits ON the teeth, not floating away
+        # The lingual normal points INWARD, so negative offset moves OUTWARD slightly
+        offset = -0.5  # Push wire toward teeth
+        bracket_pos = bracket_pos + normal * offset
         
         # Determine visibility (only frontal teeth get brackets: incisors and canines)
         visible = tooth_type in ['incisor', 'canine']
