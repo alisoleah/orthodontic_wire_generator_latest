@@ -278,6 +278,38 @@ class CollapsibleControlPanel(QWidget):
         layout.addWidget(section7)
         
         # ============================================
+        # SECTION 7.5: RESET/CLEAR (NEW)
+        # ============================================
+        section_clear = CollapsibleSection("RESET", section_number=7.5)
+        
+        clear_desc = QLabel("Clear all loaded models and start fresh")
+        clear_desc.setStyleSheet("color: #718096; font-size: 12px;")
+        clear_desc.setWordWrap(True)
+        section_clear.add_widget(clear_desc)
+        
+        self.clear_all_btn = QPushButton("🗑️ Clear All Models")
+        self.clear_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+            QPushButton:pressed {
+                background-color: #B91C1C;
+            }
+        """)
+        self.clear_all_btn.clicked.connect(self.clear_all_models)
+        section_clear.add_widget(self.clear_all_btn)
+        
+        layout.addWidget(section_clear)
+        
+        # ============================================
         # SECTION 8: JAW SIMULATION (Collapsible)
         # ============================================
         section8 = CollapsibleSection("JAW SIMULATION", section_number=8)
@@ -845,30 +877,68 @@ class CollapsibleControlPanel(QWidget):
                     with open(file_path, 'w') as f:
                         f.write(esp32_code)
                     QMessageBox.information(self, "Success", f"ESP32 code saved to {file_path}")
-                    
+                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"ESP32 export failed:\n{str(e)}")
     
     def export_stl(self):
-        """Export wire as STL"""
-        try:
-            active_arch = self.workflow_manager.get_active_arch()
-            arch_data = self.workflow_manager.get_arch_data(active_arch)
-            
-            if not arch_data or arch_data.get('wire_path') is None:
-                QMessageBox.warning(self, "No Wire", "Please generate a wire first.")
-                return
-            
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, 
-                "Save Wire STL", 
-                f"{active_arch}_wire.stl", 
-                "STL Files (*.stl);;All Files (*)"
-            )
-            
-            if file_path:
-                self.workflow_manager.export_stl(active_arch, file_path)
-                QMessageBox.information(self, "Success", f"Wire STL saved to {file_path}")
+        """Export wire as STL file"""
+        QMessageBox.information(self, "Coming Soon", "STL export will be available in a future update.")
+    
+    def clear_all_models(self):
+        """Clear all loaded models and reset workflow"""
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Clear All Models",
+            "This will clear all loaded models and reset the workflow.\n\nAre you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # Reset workflow manager
+                self.workflow_manager.reset_workflow()
                 
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"STL export failed:\n{str(e)}")
+                # Clear file upload cards (if they have clear method)
+                if hasattr(self.upper_card, 'clear_file'):
+                    self.upper_card.clear_file()
+                if hasattr(self.lower_card, 'clear_file'):
+                    self.lower_card.clear_file()
+                if hasattr(self.opposing_card, 'clear_file'):
+                    self.opposing_card.clear_file()
+                
+                # Reset sliders
+                self.height_slider.setValue(0)
+                self.ap_slider.setValue(0)
+                self.smoothness_slider.setValue(300)
+                self.wire_diameter.setValue(0.9)
+                self.jaw_rotation_slider.setValue(0)
+                
+                # Reset collision status
+                self.collision_status.setText("No collision check performed")
+                self.collision_status.setStyleSheet("color: #718096; font-size: 12px;")
+                
+                # Reset mode to automatic
+                self.mode_automatic.setChecked(True)
+                
+                # Reset active arch to upper
+                self.active_upper.setChecked(True)
+                self.show_both_checkbox.setChecked(False)
+                
+                # Update workflow steps
+                self.update_workflow_steps()
+                
+                QMessageBox.information(
+                    self,
+                    "Reset Complete",
+                    "All models cleared and workflow reset successfully."
+                )
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to clear models:\n{str(e)}"
+                )
