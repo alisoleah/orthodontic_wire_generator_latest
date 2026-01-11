@@ -84,7 +84,11 @@ class BracketPositioner:
     def _find_lingual_position(self, tooth_vertices: np.ndarray, tooth_center: np.ndarray,
                              arch_center: np.ndarray, target_height: float, 
                              height_axis: int) -> np.ndarray:
-        """Find position on lingual (inner) surface of tooth."""
+        """
+        Find position on TRUE lingual (inner) surface of tooth.
+        
+        FIXED: Use actual minimum distance to arch center for true innermost surface.
+        """
         # Get vertices at bracket level
         height_tolerance = self.positioning_parameters['height_tolerance']
         bracket_level_mask = np.abs(tooth_vertices[:, height_axis] - target_height) < height_tolerance
@@ -97,39 +101,30 @@ class BracketPositioner:
             bracket_pos[height_axis] = target_height
             return bracket_pos
         
-        # Calculate radial direction (outward from arch center)
-        tooth_horizontal = tooth_center.copy()
-        tooth_horizontal[height_axis] = 0
-        center_horizontal = arch_center.copy()
-        center_horizontal[height_axis] = 0
-        
-        radial_vector = tooth_horizontal - center_horizontal
-        if np.linalg.norm(radial_vector) > 0:
-            radial_direction = radial_vector / np.linalg.norm(radial_vector)
-        else:
-            radial_direction = np.array([1, 0, 0])
-        
-        # Find innermost vertices (lingual side)
-        radial_distances = []
+        # CRITICAL FIX: Find TRUE lingual surface = closest points to arch center
+        # Calculate distances to arch center (in horizontal plane)
+        distances_to_center = []
         for vertex in bracket_level_vertices:
             vertex_horizontal = vertex.copy()
             vertex_horizontal[height_axis] = 0
-            vertex_radial = vertex_horizontal - center_horizontal
-            radial_dist = np.dot(vertex_radial, radial_direction)
-            radial_distances.append(radial_dist)
+            center_horizontal = arch_center.copy()
+            center_horizontal[height_axis] = 0
+            dist = np.linalg.norm(vertex_horizontal - center_horizontal)
+            distances_to_center.append(dist)
         
-        radial_distances = np.array(radial_distances)
+        distances_to_center = np.array(distances_to_center)
         
-        # Get lingual vertices (15th percentile = innermost)
-        percentile_threshold = self.positioning_parameters['percentile_threshold']
-        percentile_value = np.percentile(radial_distances, percentile_threshold)
-        lingual_mask = radial_distances <= percentile_value
+        # Use 5th percentile of MINIMUM distances = true innermost surface
+        percentile_value = np.percentile(distances_to_center, 5)
+        lingual_mask = distances_to_center <= percentile_value
         lingual_vertices = bracket_level_vertices[lingual_mask]
         
         if len(lingual_vertices) > 3:
+            # Average of closest vertices = true lingual surface
             return np.mean(lingual_vertices, axis=0)
         else:
-            return bracket_level_vertices[np.argmin(radial_distances)]
+            # Use single closest vertex
+            return bracket_level_vertices[np.argmin(distances_to_center)]
     
     def _calculate_surface_normal(self, tooth_center: np.ndarray, 
                                 arch_center: np.ndarray) -> np.ndarray:
