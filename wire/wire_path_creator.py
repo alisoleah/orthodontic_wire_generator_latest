@@ -65,21 +65,19 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: Check if brackets have arch form data
-        arch_form = None
-        if sorted_brackets and 'on_arch' in sorted_brackets[0]:
-            # Brackets were positioned using polynomial arch
-            # Extract arch parameters from bracket positioner
-            arch_form = getattr(self, 'arch_form', None)
+        # Step 3: Check if we have arch form data for polynomial generation
+        arch_form = getattr(self, 'arch_form', None)
         
         # Step 4: Generate wire path
         if arch_form is not None:
             # NEW: Use polynomial arch for smooth homogeneous curve
+            print(f"Using polynomial arch generation (arch_form available)")
             self.wire_path = self._generate_polynomial_wire_path(
                 sorted_brackets, arch_form, arch_center
             )
         else:
             # Fallback: Use traditional spline interpolation
+            print(f"Using traditional spline (no arch_form)")
             self.control_points = self._generate_control_points(sorted_brackets, arch_center)
             self._apply_height_offset(height_offset)
             self.wire_path = self._interpolate_spline_path()
@@ -121,6 +119,21 @@ class WirePathCreator:
         # Calculate Y from polynomial arch
         y_dense = evaluate_polynomial(arch_form.A, arch_form.B, x_dense)
         
+        # CRITICAL: Add outward offset to prevent penetration
+        # Calculate normal vectors for each point
+        z_offset_array = np.zeros(num_points)
+        for i in range(num_points):
+            # Vector from arch center to point (in XY plane)
+            point_2d = np.array([x_dense[i], y_dense[i]])
+            center_2d = arch_center[:2]
+            to_point = point_2d - center_2d
+            
+            if np.linalg.norm(to_point) > 0:
+                # Normalize
+                normal_2d = to_point / np.linalg.norm(to_point)
+                # Add 3mm outward offset (INCREASED from 1.5mm)
+                y_dense[i] += normal_2d[1] * 3.0  # Apply to Y component
+        
         # Interpolate Z using cubic spline through bracket heights
         bracket_x = bracket_positions[:, 0]
         bracket_z = bracket_positions[:, 2]
@@ -138,6 +151,8 @@ class WirePathCreator:
         wire_path = np.column_stack([x_dense, y_dense, z_dense])
         
         print(f"Generated polynomial wire: {len(wire_path)} points along smooth arch")
+        print(f"  X range: {x_min:.1f} to {x_max:.1f} mm")
+        print(f"  Polynomial: Y = {arch_form.A:.3e}·x^6 + {arch_form.B:.4f}·x^2")
         
         return wire_path
     

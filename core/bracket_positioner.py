@@ -90,10 +90,12 @@ class BracketPositioner:
         # Calculate normal vector (points away from arch center)
         normal = self._calculate_arch_normal(bracket_pos, arch_center)
         
-        # Add small outward offset for clearance (1-2mm)
-        # This ensures wire sits OUTSIDE teeth
-        clearance_offset = 1.5  # mm
+        # Add LARGER outward offset for clearance (3.5mm instead of 1.5mm)
+        # This ensures wire sits WELL OUTSIDE teeth
+        clearance_offset = 3.5  # mm (INCREASED from 1.5mm)
         bracket_pos = bracket_pos + normal * clearance_offset
+        
+        print(f"  Bracket {tooth_index}: offset {clearance_offset}mm outward")
         
         # Determine visibility (only frontal teeth: incisors and canines)
         visible = tooth_type in ['incisor', 'canine']
