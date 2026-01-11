@@ -13,7 +13,8 @@ class BracketPositioner:
     def __init__(self, surface_type: str = 'lingual'):
         """Initialize bracket positioner."""
         self.surface_type = surface_type
-        self.clinical_offset = CLINICAL_OFFSETS.get(surface_type, 2.0)
+        # REDUCED: 2.0mm -> 0.5mm for closer wire-to-tooth fit
+        self.clinical_offset = CLINICAL_OFFSETS.get(surface_type, 0.5)
         self.positioning_parameters = {
             'height_tolerance': 2.0,
             'percentile_threshold': 15,  # For lingual surface detection

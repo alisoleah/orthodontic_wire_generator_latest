@@ -374,45 +374,45 @@ class WirePathCreator:
 
         return smoothed_path
 
-    def _apply_gaussian_smoothing(self, path: np.ndarray, sigma: float = 12.0) -> np.ndarray:
+    def _apply_gaussian_smoothing(self, path: np.ndarray, sigma: float = 3.0) -> np.ndarray:
         """
-        Apply MAXIMUM Gaussian smoothing for perfectly smooth curves.
-
+        Apply moderate Gaussian smoothing for tooth-following curves.
+        
         Algorithm:
-        1. Apply very strong Gaussian filter (sigma=12.0)
-        2. Apply MULTIPLE passes (5 times) for extra smoothness
-        3. No endpoint preservation - full smoothing everywhere
-
-        This creates the smoothest possible wire at the cost of slight deviation from brackets.
-
+        1. Apply Gaussian filter (sigma=3.0) - REDUCED from 12.0
+        2. Apply 2 passes (REDUCED from 5) for balance
+        3. Allows wire to follow teeth more closely
+        
+        This creates smooth wire that still follows individual tooth contours.
+        
         Args:
             path: Wire path points (Nx3 array)
-            sigma: Gaussian kernel standard deviation (12.0 = maximum smoothness)
-
+            sigma: Gaussian kernel standard deviation (3.0 = moderate smoothness)
+        
         Returns:
-            Maximum-smoothed wire path with NO sharp edges
+            Moderately-smoothed wire path that follows teeth
         """
         from scipy.ndimage import gaussian_filter1d
-
+        
         if len(path) < 5:
             return path
-
+        
         smoothed = path.copy()
-
+        
         # Apply Gaussian filter to each dimension
         for dim in range(3):  # X, Y, Z
-            # Apply smoothing 5 times for maximum effect
+            # Apply smoothing 2 times for moderate effect (REDUCED from 5)
             temp = path[:, dim].copy()
-
-            for pass_num in range(5):  # 5 passes of smoothing
+            
+            for pass_num in range(2):  # 2 passes of smoothing
                 temp = gaussian_filter1d(
                     temp,
-                    sigma=sigma,  # Maximum sigma = 12.0
+                    sigma=sigma,  # Moderate sigma = 3.0 (REDUCED from 12.0)
                     mode='nearest'
                 )
-
+            
             smoothed[:, dim] = temp
-
+        
         return smoothed
     
     def _validate_and_clean_path(self) -> np.ndarray:
