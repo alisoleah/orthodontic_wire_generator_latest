@@ -90,8 +90,9 @@ class BracketPositioner:
         surface_offset = self.positioning_parameters['surface_offset']
         bracket_pos = bracket_pos + normal * surface_offset
         
-        # Determine visibility
-        visible = tooth_type in ['incisor', 'canine']
+        # CRITICAL FIX: Show ALL brackets for lingual wire (not just incisors/canines)
+        # Lingual wires go across all teeth
+        visible = True  # Show all teeth
         
         return {
             'position': bracket_pos,
@@ -149,18 +150,20 @@ class BracketPositioner:
         
         radial_distances = np.array(radial_distances)
         
-        # Use 10th percentile to find TRUE innermost surface
-        percentile_threshold = self.positioning_parameters['percentile_threshold']
+        # CRITICAL FIX: Use 90th percentile to find TRUE innermost surface
+        # 10th percentile gives OUTERMOST points (wrong!)
+        # 90th percentile gives INNERMOST points (correct for lingual!)
+        percentile_threshold = 90  # Changed from 10 to 90
         percentile_value = np.percentile(radial_distances, percentile_threshold)
-        lingual_mask = radial_distances <= percentile_value
+        lingual_mask = radial_distances >= percentile_value  # Changed <= to >=
         lingual_vertices = bracket_level_vertices[lingual_mask]
         
         if len(lingual_vertices) > 3:
             # Average of innermost vertices = true lingual surface
             return np.mean(lingual_vertices, axis=0)
         else:
-            # Use single innermost vertex
-            return bracket_level_vertices[np.argmin(radial_distances)]
+            # Use single innermost vertex (maximum radial distance for lingual)
+            return bracket_level_vertices[np.argmax(radial_distances)]
     
     def _calculate_tooth_surface_normal(self, surface_point: np.ndarray,
                                        tooth_vertices: np.ndarray,
