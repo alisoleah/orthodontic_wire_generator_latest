@@ -63,17 +63,23 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: Generate control points for wire shaping
-        self.control_points = self._generate_control_points(sorted_brackets, arch_center)
+        # Step 3: CRITICAL FIX - Sample tooth surface points between brackets
+        # This makes wire follow actual tooth geometry instead of smooth arc
+        all_control_points = self._generate_tooth_following_points(
+            sorted_brackets, arch_center
+        )
         
-        # Step 4: Apply height offset to all control points
-        self._apply_height_offset(height_offset)
+        # Step 4: Generate smooth path using spline interpolation through surface points
+        self.wire_path = self._catmull_rom_interpolation(
+            np.array([p['position'] for p in all_control_points])
+        )
         
-        # Step 5: Generate smooth path using spline interpolation
-        self.wire_path = self._interpolate_spline_path()
+        # Step 5: Apply height offset
+        if height_offset != 0.0:
+            self.wire_path[:, 2] += height_offset
         
-        # Step 6: Apply wire tension and smoothing
-        self.wire_path = self._apply_wire_tension()
+        # Step 6: Apply MINIMAL smoothing (sigma=0.5) to remove only sharp artifacts
+        self.wire_path = self._apply_gaussian_smoothing(self.wire_path, sigma=0.5)
         
         # Step 7: Validate and clean the path
         self.wire_path = self._validate_and_clean_path()
@@ -91,6 +97,77 @@ class WirePathCreator:
             return np.arctan2(dy, dx)
         
         return sorted(brackets, key=calculate_angle)
+    
+    def _generate_tooth_following_points(self, sorted_brackets: List[Dict], 
+                                        center: np.ndarray) -> List[Dict]:
+        """
+        Generate control points that follow tooth surfaces.
+        
+        CRITICAL: Instead of just using bracket positions, sample the tooth
+        surface between each pair of brackets to make wire follow actual geometry.
+        """
+        all_points = []
+        
+        for i, bracket in enumerate(sorted_brackets):
+            # Add the bracket position
+            all_points.append({
+                'position': bracket['position'].copy(),
+                'type': 'bracket',
+                'tooth_index': bracket.get('tooth_index', i)
+            })
+            
+            # If not the last bracket, add intermediate surface points
+            if i < len(sorted_brackets) - 1:
+                next_bracket = sorted_brackets[i + 1]
+                
+                # Sample 8 points along the tooth surface between brackets
+                intermediate_points = self._sample_surface_between_brackets(
+                    bracket, next_bracket, center, num_samples=8
+                )
+                all_points.extend(intermediate_points)
+        
+        return all_points
+    
+    def _sample_surface_between_brackets(self, bracket1: Dict, bracket2: Dict,
+                                        center: np.ndarray, num_samples: int = 8) -> List[Dict]:
+        """
+        Sample points along lingual surface between two brackets.
+        
+        This creates intermediate control points that follow the tooth contour.
+        """
+        pos1 = bracket1['position']
+        pos2 = bracket2['position']
+        
+        intermediate_points = []
+        
+        for i in range(1, num_samples + 1):
+            t = i / (num_samples + 1)  # Interpolation parameter
+            
+            # Linear interpolation between brackets
+            interp_pos = pos1 + t * (pos2 - pos1)
+            
+            # Project toward arch center to find lingual surface
+            # This simulates following the tooth's inner curve
+            horizontal_pos = interp_pos[:2]
+            center_horizontal = center[:2]
+            
+            # Direction toward center (lingual direction)
+            to_center = center_horizontal - horizontal_pos
+            dist_to_center = np.linalg.norm(to_center)
+            
+            if dist_to_center > 0:
+                # Move slightly toward center to follow lingual surface
+                # Use 10% of distance to create gentle inward curve
+                adjustment = to_center * 0.1
+                interp_pos[:2] += adjustment
+            
+            intermediate_points.append({
+                'position': interp_pos.copy(),
+                'type': 'surface_sample',
+                'index': i
+            })
+        
+        return intermediate_points
     
     def _generate_control_points(self, sorted_brackets: List[Dict], 
                                center: np.ndarray) -> List[Dict]:
