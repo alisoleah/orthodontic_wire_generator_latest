@@ -127,17 +127,19 @@ class BracketPositioner:
             bracket_pos[height_axis] = target_height
             return bracket_pos
         
-        # Calculate radial direction (outward from arch center)
+        # Calculate radial direction (INWARD toward palate for lingual)
         tooth_horizontal = tooth_center.copy()
         tooth_horizontal[height_axis] = 0
         center_horizontal = arch_center.copy()
         center_horizontal[height_axis] = 0
         
-        radial_vector = tooth_horizontal - center_horizontal
+        # CRITICAL FIX: For LINGUAL, radial direction points INWARD (from tooth to center)
+        # This is OPPOSITE of buccal!
+        radial_vector = center_horizontal - tooth_horizontal  # REVERSED: center - tooth
         if np.linalg.norm(radial_vector) > 0:
             radial_direction = radial_vector / np.linalg.norm(radial_vector)
         else:
-            radial_direction = np.array([1, 0, 0])
+            radial_direction = np.array([-1, 0, 0])  # Default inward
         
         # Calculate radial distances for all vertices at this height
         radial_distances = []
@@ -150,20 +152,19 @@ class BracketPositioner:
         
         radial_distances = np.array(radial_distances)
         
-        # CRITICAL FIX: Use 90th percentile to find TRUE innermost surface
-        # 10th percentile gives OUTERMOST points (wrong!)
-        # 90th percentile gives INNERMOST points (correct for lingual!)
-        percentile_threshold = 90  # Changed from 10 to 90
+        # For lingual: MINIMUM radial distance = closest to palate = TRUE lingual surface
+        # Use 10th percentile to get innermost points
+        percentile_threshold = 10
         percentile_value = np.percentile(radial_distances, percentile_threshold)
-        lingual_mask = radial_distances >= percentile_value  # Changed <= to >=
+        lingual_mask = radial_distances <= percentile_value
         lingual_vertices = bracket_level_vertices[lingual_mask]
         
         if len(lingual_vertices) > 3:
             # Average of innermost vertices = true lingual surface
             return np.mean(lingual_vertices, axis=0)
         else:
-            # Use single innermost vertex (maximum radial distance for lingual)
-            return bracket_level_vertices[np.argmax(radial_distances)]
+            # Use single innermost vertex (minimum radial distance for lingual)
+            return bracket_level_vertices[np.argmin(radial_distances)]
     
     def _calculate_tooth_surface_normal(self, surface_point: np.ndarray,
                                        tooth_vertices: np.ndarray,

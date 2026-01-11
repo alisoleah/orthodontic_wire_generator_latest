@@ -498,7 +498,7 @@ class EnhancedMainWindow(QMainWindow if PYQT5_AVAILABLE else object):
             # Clear all actors from visualizer
             self.visualizer.plotter.clear()
             self.visualizer.plotter.reset_camera()
-        self.status_panel.clear_all_info()
+        # Status panel will update automatically
         self.update_status("All models cleared - ready for new project")
 
     # ============================================
