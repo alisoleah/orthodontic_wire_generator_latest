@@ -63,23 +63,31 @@ class WirePathCreator:
         # Step 2: Sort brackets by angular position around arch center
         sorted_brackets = self._sort_brackets_by_angle(visible_brackets, arch_center)
         
-        # Step 3: Generate wire that follows tooth contours
-        # This creates control points that trace along the lingual surface
+        # Step 3: Calculate reference radius from BRACKET positions (not wire)
+        # Brackets are correctly positioned on lingual surface, use them as reference
+        bracket_radii = []
+        for b in sorted_brackets:
+            pos = b['position']
+            r = np.linalg.norm(pos[:2] - arch_center[:2])
+            bracket_radii.append(r)
+        self._reference_radius = np.mean(bracket_radii)  # Store for collision detection
+        
+        # Step 4: Generate wire that follows tooth contours
         contour_points = self._generate_tooth_contour_points(sorted_brackets, arch_center)
         
-        # Step 4: Generate wire through contour points with tension for bends
+        # Step 5: Generate wire through contour points with tension for bends
         self.wire_path = self._generate_angular_wire_path(contour_points)
         
-        # Step 5: Apply height offset (adjusted for better initial position)
+        # Step 6: Apply height offset (adjusted for better initial position)
         default_height_offset = 0.5  # Slight upward adjustment
         total_offset = height_offset + default_height_offset
         if total_offset != 0.0:
             self.wire_path[:, 2] += total_offset
         
-        # Step 6: COLLISION DETECTION - push penetrating points outward
+        # Step 7: COLLISION DETECTION - use bracket reference radius
         self.wire_path = self._apply_collision_detection(self.wire_path, arch_center)
         
-        # Step 7: Validate and clean the path
+        # Step 8: Validate and clean the path
         self.wire_path = self._validate_and_clean_path()
         
         return self.wire_path
@@ -178,13 +186,17 @@ class WirePathCreator:
             return wire_path
         
         corrected_path = wire_path.copy()
-        
-        # Calculate average radius of brackets from center (this is the target surface)
-        horizontal_wire = wire_path[:, :2]  # X-Y only
         center_2d = arch_center[:2]
         
-        distances = np.linalg.norm(horizontal_wire - center_2d, axis=1)
-        target_radius = np.percentile(distances, 75)  # Use 75th percentile as target
+        # Use BRACKET reference radius (stored earlier) instead of wire positions
+        # This ensures wire is pushed to correct surface even if it starts inside teeth
+        if hasattr(self, '_reference_radius') and self._reference_radius > 0:
+            target_radius = self._reference_radius
+        else:
+            # Fallback: use 75th percentile of wire distances
+            horizontal_wire = wire_path[:, :2]
+            distances = np.linalg.norm(horizontal_wire - center_2d, axis=1)
+            target_radius = np.percentile(distances, 75)
         
         # For each point, ensure it's not inside the teeth
         for i in range(len(wire_path)):
@@ -192,7 +204,8 @@ class WirePathCreator:
             dist_to_center = np.linalg.norm(point_2d - center_2d)
             
             # If point is too close to center (inside teeth), push outward
-            if dist_to_center < target_radius * 0.95:  # 5% margin
+            # Use tighter margin (0.98) to ensure wire is ON the surface
+            if dist_to_center < target_radius * 0.98:
                 # Direction from center to point
                 direction = point_2d - center_2d
                 if np.linalg.norm(direction) > 0:
@@ -200,7 +213,7 @@ class WirePathCreator:
                 else:
                     direction = np.array([1, 0])
                 
-                # Push point to target radius
+                # Push point to target radius (exactly to bracket level)
                 corrected_path[i, :2] = center_2d + direction * target_radius
         
         return corrected_path
