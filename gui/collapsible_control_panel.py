@@ -792,8 +792,12 @@ class CollapsibleControlPanel(QWidget):
                 QMessageBox.warning(self, "No Wire", "Please generate a wire first.")
                 return
             
-            if not self.workflow_manager.opposing_arch_data:
-                QMessageBox.warning(self, "No Opposing Arch", "Please load opposing arch first.")
+            # Check if opposing arch is loaded
+            has_opposing = hasattr(self.workflow_manager, 'opposing_arch_data') and self.workflow_manager.opposing_arch_data
+            if not has_opposing:
+                QMessageBox.warning(self, "No Opposing Arch", 
+                    "Please load the opposing arch first.\n\n"
+                    "This feature checks if the wire would collide with the opposing teeth when biting.")
                 return
             
             # Check for collisions
