@@ -100,7 +100,6 @@ class WorkflowManager:
     def set_global_height(self, height_offset: float):
         """Set global height offset for wire"""
         self.global_height_offset = height_offset
-        # print(f"Global height offset set to: {height_offset:.2f}mm")
 
     def set_global_ap_offset(self, ap_offset: float):
         """Set global anterior/posterior offset for wire"""
